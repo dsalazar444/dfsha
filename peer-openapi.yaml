@@ -1,0 +1,129 @@
+openapi: 3.0.3
+info:
+  title: DFSha - Peer API
+  description: >
+    API expuesta por cada peer de DFSha. Un peer es a la vez cliente y
+    nodo de almacenamiento: recibe, sirve y elimina chunks por
+    solicitud de otros peers, coordinados por el superpeer.
+
+    Nota de diseño: por ahora el peer NO valida tokens de
+    usuario/permiso en las lecturas de chunk — se asume que si el
+    superpeer entregó la URL del peer, ya validó correctamente al
+    solicitante. Queda documentado como decisión pendiente para una
+    futura capa de token de acceso firmado por chunk (ver repositorio
+    de requisitos, decisiones pendientes).
+  version: "0.1.0"
+
+servers:
+  - url: http://localhost:9000
+    description: Peer local (desarrollo)
+
+tags:
+  - name: chunks
+
+paths:
+
+  /chunks/receive:
+    post:
+      tags: [chunks]
+      summary: >
+        Recibe un chunk de otro peer (o del peer dueño durante un
+        put). Verifica integridad contra el hash esperado.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [chunk, hash_esperado]
+              properties:
+                chunk:
+                  type: string
+                  format: binary
+                hash_esperado:
+                  type: string
+                  description: SHA256 esperado del chunk
+      responses:
+        "200":
+          description: Chunk recibido y verificado correctamente
+        "400":
+          description: >
+            Hash no coincide (chunk corrupto). El cliente debe
+            reintentar la subida con OTRO peer de la lista de
+            réplicas, no con el mismo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /chunks/{chunk_id}:
+    get:
+      tags: [chunks]
+      summary: Sirve un chunk a quien lo solicite
+      parameters:
+        - in: path
+          name: chunk_id
+          required: true
+          schema:
+            type: string
+          description: "Identificador compuesto: {file_id}_{indice_chunk}"
+      responses:
+        "200":
+          description: Chunk encontrado
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: El peer no tiene este chunk
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    delete:
+      tags: [chunks]
+      summary: >
+        Elimina un chunk. Relajado/eventual: responde 200 en cuanto
+        empieza el proceso de borrado, igual que el borrado de
+        archivo en el superpeer.
+      parameters:
+        - in: path
+          name: chunk_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Eliminación iniciada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje:
+                    type: string
+                    example: "Empezando eliminación"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+  responses:
+    ServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
