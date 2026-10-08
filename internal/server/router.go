@@ -27,8 +27,15 @@ type peerHandler interface {
 	Heartbeat(w http.ResponseWriter, r *http.Request)
 }
 
+// fsHandler is the subset of fs.Handler needed by the router
+type fsHandler interface {
+	Mkdir(w http.ResponseWriter, r *http.Request)
+	Rmdir(w http.ResponseWriter, r *http.Request)
+	Ls(w http.ResponseWriter, r *http.Request)
+}
+
 // NewRouter sets up the Chi router and routes
-func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler) http.Handler {
+func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler, fsHandler fsHandler) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware 
@@ -56,9 +63,9 @@ func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandl
 		protected.Post("/peers/heartbeat", peerHandler.Heartbeat)
 
 		// Phase 3: logical filesystem
-		protected.Post("/fs/mkdir", notImplemented("POST /fs/mkdir"))
-		protected.Delete("/fs/rmdir", notImplemented("DELETE /fs/rmdir"))
-		protected.Get("/fs/ls", notImplemented("GET /fs/ls"))
+		protected.Post("/fs/mkdir", fsHandler.Mkdir)
+		protected.Delete("/fs/rmdir", fsHandler.Rmdir)
+		protected.Get("/fs/ls", fsHandler.Ls)
 
 		// Phase 4: file upload coordination
 		protected.Post("/files/put/init", notImplemented("POST /files/put/init"))

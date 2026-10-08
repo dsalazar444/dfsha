@@ -7,6 +7,7 @@ import (
 	"context"
 	"dfsha/internal/auth"
 	"dfsha/internal/config"
+	"dfsha/internal/fs"
 	"dfsha/internal/peers"
 	"dfsha/internal/server"
 	"dfsha/internal/store"
@@ -30,17 +31,20 @@ func main() {
 	// Build stores
 	userStore := store.NewUserStore()
 	peerStore := store.NewPeerStore()
+	fsStore := store.NewFsStore()
 
 	// Build services
 	authService := auth.NewService(userStore)
 	peerService := peers.NewService(peerStore, cfg.HeartbeatTimeout)
+	fsService := fs.NewService(fsStore)
 
 	// Build HTTP handlers
 	authHandler := auth.NewHandler(authService)
 	peerHandler := peers.NewHandler(peerService)
+	fsHandler := fs.NewHandler(fsService)
 
 	// Build the HTTP router with all routes registered
-	router := server.NewRouter(cfg, authService, authHandler, peerHandler)
+	router := server.NewRouter(cfg, authService, authHandler, peerHandler, fsHandler)
 
 	// Configure the HTTP server
 	httpServer := &http.Server{
