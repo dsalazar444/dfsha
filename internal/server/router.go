@@ -1,4 +1,5 @@
 // Package server wires together all routes and middleware for the superpeer
+
 package server
 
 import (
@@ -10,33 +11,37 @@ import (
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
-// tokenValidator is the subset of auth.Service needed by the router
+// tokenValidator is the subset of auth.Service needed by the auth middleware
 type tokenValidator interface {
 	UserIDByToken(token string) (string, bool)
 }
 
-// NewRouter builds and returns the chi router with all superpeer routes
-// Each phase will register its own sub-router here
-func NewRouter(cfg *config.Config, tokens tokenValidator) http.Handler {
+// loginHandler is the subset of auth.Handler needed by the router
+type loginHandler interface {
+	Login(w http.ResponseWriter, r *http.Request)
+}
+
+// NewRouter sets up the Chi router and routes
+func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware 
-	r.Use(chiMiddleware.RequestID)   // attach unique X-Request-Id to each request
-	r.Use(chiMiddleware.RealIP)      // read real IP from X-Forwarded-For
-	r.Use(chiMiddleware.Logger)      // structured request log line
-	r.Use(chiMiddleware.Recoverer)   // recover from panics and return 500
+	r.Use(chiMiddleware.RequestID) // attach unique X-Request-Id to each request
+	r.Use(chiMiddleware.RealIP)    // read real IP from X-Forwarded-For
+	r.Use(chiMiddleware.Logger)    // structured request log line
+	r.Use(chiMiddleware.Recoverer) // recover from panics and return 500
 
-	// Health check (no auth) 
+	// Health check (no auth)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Public routes (no token required) 
-	// Phase 1: auth handler will be mounted here
-	r.Post("/auth/login", notImplemented("POST /auth/login"))
+	// Public routes (no token required)
+	r.Post("/auth/login", authHandler.Login) // Phase 1 
 
-	// Protected routes (require Bearer token)
+	// Protected routes (require valid Bearer token)
 	r.Group(func(protected chi.Router) {
 		protected.Use(middleware.RequireAuth(tokens))
 
@@ -66,7 +71,7 @@ func NewRouter(cfg *config.Config, tokens tokenValidator) http.Handler {
 }
 
 // notImplemented returns a placeholder handler that responds 501 with a clear
-// message. Each handler is replaced as its phase is implemented.
+// Replaced phase by phase as each handler is implemented
 func notImplemented(endpoint string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

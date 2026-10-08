@@ -1,13 +1,14 @@
 // Superpeer entrypoint
-//
 // Configuration is loaded entirely from environment variables
 
+package main
 
 import (
 	"context"
 	"dfsha/internal/auth"
 	"dfsha/internal/config"
 	"dfsha/internal/server"
+	"dfsha/internal/store"
 	"errors"
 	"log"
 	"net/http"
@@ -25,11 +26,17 @@ func main() {
 	log.Printf("[superpeer] chunk_size=%d bytes | replication=%d | heartbeat_timeout=%s",
 		cfg.ChunkSize, cfg.ReplicationFactor, cfg.HeartbeatTimeout)
 
-	// Build dependencies (stubs for Phase 0, replaced phase by phase)
-	authService := auth.NewService()
+	// Build stores
+	userStore := store.NewUserStore()
+
+	// Build services
+	authService := auth.NewService(userStore)
+
+	// Build HTTP handlers
+	authHandler := auth.NewHandler(authService)
 
 	// Build the HTTP router with all routes registered
-	router := server.NewRouter(cfg, authService)
+	router := server.NewRouter(cfg, authService, authHandler)
 
 	// Configure the HTTP server
 	httpServer := &http.Server{
