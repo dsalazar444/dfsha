@@ -7,6 +7,7 @@ import (
 	"context"
 	"dfsha/internal/auth"
 	"dfsha/internal/config"
+	"dfsha/internal/peers"
 	"dfsha/internal/server"
 	"dfsha/internal/store"
 	"errors"
@@ -28,15 +29,18 @@ func main() {
 
 	// Build stores
 	userStore := store.NewUserStore()
+	peerStore := store.NewPeerStore()
 
 	// Build services
 	authService := auth.NewService(userStore)
+	peerService := peers.NewService(peerStore, cfg.HeartbeatTimeout)
 
 	// Build HTTP handlers
 	authHandler := auth.NewHandler(authService)
+	peerHandler := peers.NewHandler(peerService)
 
 	// Build the HTTP router with all routes registered
-	router := server.NewRouter(cfg, authService, authHandler)
+	router := server.NewRouter(cfg, authService, authHandler, peerHandler)
 
 	// Configure the HTTP server
 	httpServer := &http.Server{
@@ -46,6 +50,11 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// Start background tasks
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel() // ensure tasks are cancelled on exit
+	peerService.StartHealthMonitor(bgCtx)
 
 	// Start listening in a goroutine so we can handle shutdown signals
 	serverErr := make(chan error, 1)

@@ -21,8 +21,14 @@ type loginHandler interface {
 	Login(w http.ResponseWriter, r *http.Request)
 }
 
+// peerHandler is the subset of peers.Handler needed by the router
+type peerHandler interface {
+	Register(w http.ResponseWriter, r *http.Request)
+	Heartbeat(w http.ResponseWriter, r *http.Request)
+}
+
 // NewRouter sets up the Chi router and routes
-func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler) http.Handler {
+func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware 
@@ -46,8 +52,8 @@ func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandl
 		protected.Use(middleware.RequireAuth(tokens))
 
 		// Phase 2: peer management
-		protected.Post("/peers/register", notImplemented("POST /peers/register"))
-		protected.Post("/peers/heartbeat", notImplemented("POST /peers/heartbeat"))
+		protected.Post("/peers/register", peerHandler.Register)
+		protected.Post("/peers/heartbeat", peerHandler.Heartbeat)
 
 		// Phase 3: logical filesystem
 		protected.Post("/fs/mkdir", notImplemented("POST /fs/mkdir"))
