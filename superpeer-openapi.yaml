@@ -2,15 +2,15 @@ openapi: 3.0.3
 info:
   title: DFSha - Superpeer API
   description: >
-    API del Superpeer para DFSha (P2P centralizado, fase 1).
-    Coordina metadata, usuarios, ubicación de chunks y salud de peers.
-    No transfiere bytes de archivos: solo coordina, los chunks viajan
-    peer-a-peer.
+    API for the Superpeer in DFSha (centralized P2P, phase 1).
+    It coordinates metadata, users, chunk locations, and peer health.
+    It does not transfer file bytes: only coordinates them, while chunks
+    travel peer-to-peer.
   version: "0.1.0"
 
 servers:
   - url: http://localhost:8080
-    description: Superpeer local (desarrollo)
+    description: Local superpeer (development)
 
 security:
   - bearerAuth: []
@@ -27,33 +27,33 @@ paths:
   /auth/login:
     post:
       tags: [auth]
-      summary: Login de usuario
-      security: []  # único endpoint público, no requiere token
+      summary: User login
+      security: []  # public endpoint, does not require a token
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [usuario, contrasena]
+              required: [username, password]
               properties:
-                usuario:
+                username:
                   type: string
-                contrasena:
+                password:
                   type: string
                   format: password
       responses:
         "200":
-          description: Login exitoso
+          description: Login successful
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  token_de_sesion:
+                  session_token:
                     type: string
         "401":
-          description: Credenciales inválidas
+          description: Invalid credentials
           content:
             application/json:
               schema:
@@ -64,24 +64,24 @@ paths:
   /peers/register:
     post:
       tags: [peers]
-      summary: Registra un cliente autenticado como peer
+      summary: Register an authenticated client as a peer
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [direccion, puerto]
+              required: [address, port]
               properties:
-                direccion:
+                address:
                   type: string
                   example: "192.168.1.10"
-                puerto:
+                port:
                   type: string
                   example: "9000"
       responses:
         "200":
-          description: Peer registrado
+          description: Peer registered
           content:
             application/json:
               schema:
@@ -100,34 +100,34 @@ paths:
     post:
       tags: [peers]
       summary: >
-        Heartbeat periódico de un peer. No incluye campo "estado": el
-        superpeer infiere healthy por la sola llegada del heartbeat
-        dentro del timeout configurado.
+        Periodic heartbeat from a peer. It does not include an "status"
+        field: the superpeer infers health solely from the arrival of the
+        heartbeat within the configured timeout.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [peer_id, espacio_disponible, chunks]
+              required: [peer_id, available_space, chunks]
               properties:
                 peer_id:
                   type: string
-                espacio_disponible:
+                available_space:
                   type: string
-                  description: Espacio libre reportado por el peer (ej. bytes disponibles)
+                  description: Free space reported by the peer (for example, available bytes)
                 chunks:
                   type: array
-                  description: Lista de chunk_id que el peer tiene actualmente
+                  description: List of chunk_id currently held by the peer
                   items:
                     type: string
       responses:
         "200":
-          description: Heartbeat recibido
+          description: Heartbeat received
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
-          description: peer_id no registrado
+          description: peer_id is not registered
           content:
             application/json:
               schema:
@@ -138,7 +138,7 @@ paths:
   /fs/mkdir:
     post:
       tags: [fs]
-      summary: Crea un directorio lógico (solo metadata, no toca chunks)
+      summary: Create a logical directory (metadata only; no chunk handling)
       requestBody:
         required: true
         content:
@@ -149,11 +149,11 @@ paths:
               properties:
                 path:
                   type: string
-                  description: Ruta absoluta en el namespace lógico del usuario
-                  example: "/docs/tesis"
+                  description: Absolute path in the user's logical namespace
+                  example: "/docs/thesis"
       responses:
         "200":
-          description: Directorio creado
+          description: Directory created
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -166,7 +166,7 @@ paths:
   /fs/rmdir:
     delete:
       tags: [fs]
-      summary: Elimina un directorio lógico (solo metadata)
+      summary: Delete a logical directory (metadata only)
       requestBody:
         required: true
         content:
@@ -177,10 +177,10 @@ paths:
               properties:
                 path:
                   type: string
-                  example: "/docs/tesis"
+                  example: "/docs/thesis"
       responses:
         "200":
-          description: Directorio eliminado
+          description: Directory deleted
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -196,9 +196,9 @@ paths:
     get:
       tags: [fs]
       summary: >
-        Lista contenido de un directorio lógico. Sin endpoint para
-        "cd": el pwd es un concepto puramente local del cliente, que
-        siempre manda rutas absolutas aquí.
+        Lists the contents of a logical directory. There is no
+        "cd" endpoint: the current working directory is a purely
+        local client concept, which always sends absolute paths here.
       parameters:
         - in: query
           name: path
@@ -208,22 +208,22 @@ paths:
           example: "/docs"
       responses:
         "200":
-          description: Listado del directorio
+          description: Directory listing
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  entradas:
+                  entries:
                     type: array
                     items:
                       type: object
                       properties:
-                        nombre:
+                        name:
                           type: string
-                        tipo:
+                        type:
                           type: string
-                          enum: [archivo, directorio]
+                          enum: [file, directory]
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -237,30 +237,31 @@ paths:
     post:
       tags: [files]
       summary: >
-        Inicia una subida: el cliente ya partió el archivo y calculó
-        hash por chunk. El superpeer crea el file_id y asigna peers
-        destino por chunk según factor de replicación.
+        Starts an upload: the client has already split the file and
+        calculated the hash per chunk. The superpeer creates the file_id
+        and assigns destination peers per chunk according to the
+        replication factor.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [ruta_logica, cantidad_de_chunks, hash_de_cada_chunk]
+              required: [logical_path, chunk_count, hash_of_each_chunk]
               properties:
-                ruta_logica:
+                logical_path:
                   type: string
-                  example: "/docs/tesis/capitulo1.pdf"
-                cantidad_de_chunks:
+                  example: "/docs/thesis/chapter1.pdf"
+                chunk_count:
                   type: integer
-                hash_de_cada_chunk:
+                hash_of_each_chunk:
                   type: array
                   items:
                     type: string
-                    description: SHA256 de cada chunk, en orden
+                    description: SHA256 of each chunk, in order
       responses:
         "200":
-          description: Asignación de destinos generada
+          description: Destination assignment generated
           content:
             application/json:
               schema:
@@ -268,19 +269,19 @@ paths:
                 properties:
                   file_id:
                     type: string
-                  asignacion:
+                  assignment:
                     type: array
                     items:
                       type: object
                       properties:
                         chunk_id:
                           type: string
-                          description: "Compuesto: {file_id}_{indice_chunk}"
-                        peers_destino:
+                          description: "Compound: {file_id}_{chunk_index}"
+                        destination_peers:
                           type: array
                           items:
                             type: string
-                            description: "URL de peer destino, ej. http://192.168.1.10:9000"
+                            description: "Peer destination URL, e.g. http://192.168.1.10:9000"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -293,7 +294,7 @@ paths:
   /files/put/ack:
     post:
       tags: [files]
-      summary: Un peer confirma que recibió y verificó un chunk
+      summary: A peer confirms that it received and verified a chunk
       requestBody:
         required: true
         content:
@@ -308,11 +309,11 @@ paths:
                   type: string
       responses:
         "200":
-          description: ACK registrado
+          description: ACK registered
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
-          description: chunk_id no corresponde a ningún put iniciado, o peer_id no existe
+          description: chunk_id does not correspond to any initiated upload, or peer_id does not exist
           content:
             application/json:
               schema:
@@ -320,22 +321,22 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
-  /files/get/{ruta}:
+  /files/get/{path}:
     get:
       tags: [files]
       summary: >
-        Devuelve la ubicación de los chunks de un archivo, resolviendo
-        la ruta lógica a file_id internamente.
+        Returns the location of a file's chunks by resolving the logical
+        path to the internal file_id.
       parameters:
         - in: path
-          name: ruta
+          name: path
           required: true
           schema:
             type: string
-          example: "docs/tesis/capitulo1.pdf"
+          example: "docs/thesis/chapter1.pdf"
       responses:
         "200":
-          description: Ubicación de chunks
+          description: Chunk locations
           content:
             application/json:
               schema:
@@ -355,8 +356,8 @@ paths:
                           items:
                             type: string
                             description: >
-                              URLs de peers que tienen este chunk (varias,
-                              para permitir retry si alguno está caído)
+                              URLs of peers that have this chunk (several,
+                              to allow retry if any are down)
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -366,31 +367,31 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
-  /files/{ruta}:
+  /files/{path}:
     delete:
       tags: [files]
       summary: >
-        Elimina un archivo. Borrado relajado/eventual: responde 200 en
-        cuanto empieza el proceso, sin esperar confirmación de todos
-        los peers. Es usada por superpeer para completar rmdir.
+        Deletes a file. Relaxed/eventual deletion: responds 200 as soon
+        as the deletion process starts, without waiting for all peers to
+        confirm. It is used by the superpeer to complete rmdir.
       parameters:
         - in: path
-          name: ruta
+          name: path
           required: true
           schema:
             type: string
-          example: "docs/tesis/capitulo1.pdf"
+          example: "docs/thesis/chapter1.pdf"
       responses:
         "200":
-          description: Eliminación iniciada
+          description: Deletion started
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  mensaje:
+                  message:
                     type: string
-                    example: "Empezando eliminación de archivo"
+                    example: "Starting file deletion"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -400,22 +401,21 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
-  /files/lock/{ruta}:
+  /files/lock/{path}:
     post:
       tags: [locks]
       summary: >
-        Solicita lock de escritura sobre un archivo. Llamado
-        internamente por el cliente como parte del comando "modify",
-        nunca directamente por el usuario del CLI.
+        Requests a write lock on a file. Called internally by the client as
+        part of the "modify" command and never directly by the CLI user.
       parameters:
         - in: path
-          name: ruta
+          name: path
           required: true
           schema:
             type: string
       responses:
         "200":
-          description: Lock concedido
+          description: Lock granted
           content:
             application/json:
               schema:
@@ -433,7 +433,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: El archivo ya está bloqueado por otro usuario
+          description: The file is already locked by another user
           content:
             application/json:
               schema:
@@ -441,13 +441,13 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
-  /files/unlock/{ruta}:
+  /files/unlock/{path}:
     post:
       tags: [locks]
-      summary: Libera un lock de escritura. Idempotente.
+      summary: Releases a write lock. Idempotent.
       parameters:
         - in: path
-          name: ruta
+          name: path
           required: true
           schema:
             type: string
@@ -463,11 +463,11 @@ paths:
                   type: string
       responses:
         "200":
-          description: Lock liberado
+          description: Lock released
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          description: El lock ya expiró o no existe (no es error fatal)
+          description: The lock has expired or does not exist (not a fatal error)
           content:
             application/json:
               schema:
@@ -480,7 +480,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Token de sesión obtenido en /auth/login
+      description: Session token obtained from /auth/login
 
   schemas:
     Error:
@@ -491,31 +491,31 @@ components:
 
   responses:
     BadRequest:
-      description: Body malformado o faltan campos
+      description: Malformed body or missing required fields
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     Unauthorized:
-      description: Token ausente o expirado
+      description: Missing or expired token
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     Forbidden:
-      description: Autenticado pero sin permiso sobre el recurso
+      description: Authenticated but without permission on the resource
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     NotFound:
-      description: Recurso no existe
+      description: Resource does not exist
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
     ServerError:
-      description: Error interno del servidor
+      description: Internal server error
       content:
         application/json:
           schema:
