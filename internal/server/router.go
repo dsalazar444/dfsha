@@ -34,8 +34,14 @@ type fsHandler interface {
 	Ls(w http.ResponseWriter, r *http.Request)
 }
 
+// fileHandler is the subset of files.Handler needed by the router
+type fileHandler interface {
+	PutInit(w http.ResponseWriter, r *http.Request)
+	PutAck(w http.ResponseWriter, r *http.Request)
+}
+
 // NewRouter sets up the Chi router and routes
-func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler, fsHandler fsHandler) http.Handler {
+func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler, fsHandler fsHandler, fileHandler fileHandler) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware 
@@ -68,8 +74,8 @@ func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandl
 		protected.Get("/fs/ls", fsHandler.Ls)
 
 		// Phase 4: file upload coordination
-		protected.Post("/files/put/init", notImplemented("POST /files/put/init"))
-		protected.Post("/files/put/ack", notImplemented("POST /files/put/ack"))
+		protected.Post("/files/put/init", fileHandler.PutInit)
+		protected.Post("/files/put/ack", fileHandler.PutAck)
 
 		// Phase 5: file download and deletion
 		protected.Get("/files/get/{path}", notImplemented("GET /files/get/{path}"))
