@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	ErrChunkNotFound = errors.New("chunk not found")
-	ErrFileNotFound  = errors.New("file not found")
+	ErrChunkNotFound   = errors.New("chunk not found")
+	ErrFileNotFound    = errors.New("file not found")
+	ErrPeerNotAssigned = errors.New("peer is not assigned to this chunk")
 )
 
 // ChunkMeta tracks the assignment of a single chunk
@@ -55,11 +56,8 @@ func (s *FileStore) GetFile(fileID string) (*FileMeta, bool) {
 	return file, ok
 }
 
-// AckChunk confirms that a peer successfully received and saved a chunk.
-// For now, it just verifies the chunk exists. The actual locations are tracked
-// via the assignment given during init and periodic heartbeats
-
-func (s *FileStore) AckChunk(chunkID string) error {
+// AckChunk confirms that an assigned peer successfully received and saved a chunk
+func (s *FileStore) AckChunk(chunkID, peerURL string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -67,7 +65,13 @@ func (s *FileStore) AckChunk(chunkID string) error {
 	for _, file := range s.byFile {
 		for _, chunk := range file.Chunks {
 			if chunk.ChunkID == chunkID {
-				return nil
+				// Verify the peerURL is in the list of assigned peers for this chunk
+				for _, assignedURL := range chunk.Peers {
+					if assignedURL == peerURL {
+						return nil // Match found, valid ACK
+					}
+				}
+				return ErrPeerNotAssigned
 			}
 		}
 	}
