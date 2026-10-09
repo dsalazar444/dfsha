@@ -90,3 +90,15 @@ func (s *PeerStore) GetHealthyPeers() []*Peer {
 	}
 	return healthy
 }
+
+// GetPeerURL returns the formatted URL (http://address:port) for a given peerID
+// Returns empty string if the peer is not found
+func (s *PeerStore) GetPeerURL(peerID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	if p, ok := s.byID[peerID]; ok {
+		return "http://" + p.Address + ":" + p.Port
+	}
+	return ""
+}
