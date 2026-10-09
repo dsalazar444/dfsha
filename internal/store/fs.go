@@ -20,11 +20,12 @@ var (
 	ErrNotADirectory    = errors.New("not a directory")
 )
 
-// FsNode represents a file or directory in the logical filesystem
+// FsNode represents a file or directory in the logical filesystem.
 type FsNode struct {
 	Name     string
 	Type     string
-	Children map[string]*FsNode // Only populated if Type == NodeTypeDirectory
+	FileID   string             // Populated only if Type == NodeTypeFile
+	Children map[string]*FsNode // Populated only if Type == NodeTypeDirectory
 }
 
 // FsStore manages an isolated filesystem tree per user
@@ -160,4 +161,28 @@ func (s *FsStore) Ls(userID, logicalPath string) ([]*FsNode, error) {
 	}
 
 	return children, nil
+}
+
+
+// CreateFile creates a new file node in the filesystem
+// Fails if the parent doesn't exist or if the path already exists
+func (s *FsStore) CreateFile(userID, logicalPath, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	parent, childName, err := s.traverse(userID, logicalPath)
+	if err != nil {
+		return err
+	}
+
+	if _, exists := parent.Children[childName]; exists {
+		return ErrPathAlreadyExists
+	}
+
+	parent.Children[childName] = &FsNode{
+		Name:   childName,
+		Type:   NodeTypeFile,
+		FileID: fileID,
+	}
+	return nil
 }
