@@ -252,14 +252,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [logical_path, chunk_count, hash_of_each_chunk]
+              required: [logical_path, chunk_count, hash_per_chunk]
               properties:
                 logical_path:
                   type: string
                   example: "/docs/thesis/chapter1.pdf"
                 chunk_count:
                   type: integer
-                hash_of_each_chunk:
+                hash_per_chunk:
                   type: array
                   items:
                     type: string
