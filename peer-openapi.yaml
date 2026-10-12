@@ -35,7 +35,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [chunk, expected_hash]
+              required: [chunk, expected_hash, owner_user_id]
               properties:
                 chunk:
                   type: string
@@ -43,6 +43,12 @@ paths:
                 expected_hash:
                   type: string
                   description: Expected SHA256 of the chunk
+                owner_user_id:
+                  type: string
+                  description: User chunk owner 
+                chunk_id:
+                  type: string
+                  description: chunk identifier so we can know where to save it.
       responses:
         "200":
           description: Chunk received and verified successfully

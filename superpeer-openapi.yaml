@@ -52,6 +52,11 @@ paths:
                 properties:
                   session_token:
                     type: string
+                  user_id:
+                    type: string
+                  salt: 
+                    type: string
+                    description: user's Argon2id salt, so we can derive master key
         "401":
           description: Invalid credentials
           content:
@@ -351,6 +356,9 @@ paths:
                       properties:
                         chunk_id:
                           type: string
+                        hash:
+                          type: string
+                          description: Expected chunk hash (declared by the owner in put/init), a reliable source for verifying integrity upon download.
                         peers:
                           type: array
                           items:
