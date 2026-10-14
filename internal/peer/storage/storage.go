@@ -20,6 +20,12 @@ import (
 	"syscall"
 )
 
+// struct para funcion ListChunkIDs(). Usado para representar un chunk almacenado.
+type StoredChunk struct {
+	UserID  string
+	ChunkID model.ChunkID
+}
+
 // safeComponent es la whitelist de caracteres permitidos en un solo
 // segmento de ruta (ownerUserID, o el fileID extraído de un ChunkID).
 // Es la defensa real contra path traversal: con este patrón no hay
@@ -33,10 +39,13 @@ type Store struct {
 	basePath string
 }
 
-// NewStore crea un Store sobre basePath. No crea el directorio aquí
-// mismo; cada operación crea las carpetas que necesita bajo demanda.
-func NewStore(basePath string) *Store {
-	return &Store{basePath: basePath}
+// NewStore crea un Store sobre basePath. Crea el directorio base aquí
+// mismo si no existe; cada operación crea las carpetas que necesita bajo demanda.
+func NewStore(basePath string) (*Store, error) {
+	if err := os.MkdirAll(basePath, 0o700); err != nil {
+		return nil, fmt.Errorf("creating basePath %q: %w", basePath, err)
+	}
+	return &Store{basePath: basePath}, nil
 }
 
 // chunkPath calcula la ruta final de un chunk en disco, validando
@@ -78,7 +87,15 @@ func (s *Store) chunkPath(ownerUserID string, chunkID model.ChunkID) (string, er
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(absPath, absBase+string(os.PathSeparator)) { // si absPath NO comienza con ruta base + /, retornamos error
+
+	// Obtenemos ruta relativa absBase para generar un path relativo, y visualizar de forma clara
+	// si quieren salir de directorio.
+	relPath, err := filepath.Rel(absBase, absPath)
+	if err != nil {
+		return "", err
+	}
+
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("resulted path outside of basePath: %q", absPath)
 	}
 
@@ -200,8 +217,8 @@ func (s *Store) FreeSpace() (int64, error) {
 // chunk almacenado, a partir de la estructura de carpetas
 // (ownerUserID/fileID/index). Se usa para armar el payload del
 // heartbeat periódico.
-func (s *Store) ListChunkIDs() (map[string][]model.ChunkID, error) {
-	ids := make(map[string][]model.ChunkID)
+func (s *Store) ListChunkIDs() ([]StoredChunk, error) {
+	var chunks []StoredChunk
 
 	err := filepath.WalkDir(s.basePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -231,13 +248,16 @@ func (s *Store) ListChunkIDs() (map[string][]model.ChunkID, error) {
 		if err != nil {
 			return nil // nombre de archivo que no es un índice numérico, se ignora
 		}
-		ids[userID] = append(ids[userID], model.NewChunkID(fileID, index))
 
+		chunks = append(chunks, StoredChunk{
+			UserID:  userID,
+			ChunkID: model.NewChunkID(fileID, index),
+		})
 		return nil
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("listing chunks in %q: %w", s.basePath, err)
 	}
-	return ids, nil
+	return chunks, nil
 }
