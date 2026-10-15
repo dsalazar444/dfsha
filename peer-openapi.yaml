@@ -35,7 +35,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [chunk, expected_hash, owner_user_id]
+              required: [chunk, expected_hash, owner_user_id, chunk_id]
               properties:
                 chunk:
                   type: string
