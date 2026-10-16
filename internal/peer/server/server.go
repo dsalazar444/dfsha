@@ -46,6 +46,8 @@ func (s *Server) Routes() http.Handler { // Ese tipo de retorno porque es interf
 	mux := http.NewServeMux()                              // crea enrutador vacio (mux)
 	mux.HandleFunc("POST /chunks/receive", s.receiveChunk) // le agregamos las rutas
 	mux.HandleFunc("GET /chunks/{chunk_id}", s.getChunk)
+	mux.HandleFunc("DELETE /chunks/{chunk_id}", s.deleteChunk)
+
 	return mux
 }
 
@@ -151,6 +153,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Chunk received and verified successfully"))
 }
 
 // getChunk implements GET /chunks/{chunk_id}?owner_user_id=...
@@ -169,13 +172,13 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 // 4. Escribimos chunk en HTTP response
 // NOTA: El peer que recibe la respuesta de GET es el encargado de enviar ACK
 func (s *Server) getChunk(w http.ResponseWriter, r *http.Request) {
-	chunkID := model.ChunkID(r.PathValue("chunk_id")) // No se verifica que se haya pasado porque en ruta de handler especificamos chunks/{chunk_id}, entonces si no coindiden con esa estructura, no llegan hasta acá
-	ownerUserID := r.URL.Query().Get("owner_user_id")
+	// Get urls params
+	ownerUserID, chunkID, err := chunkParams(r)
 
 	// Explicit check only to give a clear message for a missing param.
 	// The format of both identifiers is validated inside Load.
-	if ownerUserID == "" {
-		writeError(w, fmt.Errorf("%w: missing owner_user_id", storage.ErrBadRequest))
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -196,13 +199,49 @@ func (s *Server) getChunk(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) deleteChunk(w http.ResponseWriter, r *http.Request) {
+	// Get urls params
+	ownerUserID, chunkID, err := chunkParams(r)
+
+	// err for missing params
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if err := s.store.Delete(ownerUserID, chunkID); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK) // No es necesario, proque si añadimos body,
+	// sin haberlo setteado, se asigna automaticamente 200, pero por explicidad.
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte("Chunk deleted. Idempotent: also 200 if this peer did not have it."))
+}
+
+// chunkParams reads the identifiers shared by GET and DELETE on
+// /chunks/{chunk_id}. The format of both is validated later, inside
+// the storage layer; here we only guarantee the query param is there
+// so the caller gets a clear message.
+func chunkParams(r *http.Request) (ownerUserID string, chunkID model.ChunkID, err error) {
+	ownerUserID = r.URL.Query().Get("owner_user_id") // No se verifica que se haya pasado porque en ruta de handler especificamos chunks/{chunk_id}, entonces si no coindiden con esa estructura, no llegan hasta acá
+
+	// Explicit check only to give a clear message for a missing param.
+	// The format of both identifiers is validated inside Load.
+	if ownerUserID == "" {
+		return "", "", fmt.Errorf("%w: missing owner_user_id", storage.ErrBadRequest)
+	}
+	return ownerUserID, model.ChunkID(r.PathValue("chunk_id")), nil
+}
+
 // writeError maps the error category to an HTTP status. The category
 // (ErrBadRequest, ErrNotFound, ErrServer) decides the code; the wrapped
 // message carries the context.
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, storage.ErrBadRequest):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest) // escribe err.Error en body de respuesta
 	case errors.Is(err, storage.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	default:
