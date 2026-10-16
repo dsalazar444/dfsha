@@ -6,6 +6,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -44,6 +45,7 @@ func NewServer(store *storage.Store, superpeerClient *client.SuperpeerClient, pe
 func (s *Server) Routes() http.Handler { // Ese tipo de retorno porque es interfaz implementada por mux
 	mux := http.NewServeMux()                              // crea enrutador vacio (mux)
 	mux.HandleFunc("POST /chunks/receive", s.receiveChunk) // le agregamos las rutas
+	mux.HandleFunc("GET /chunks/{chunk_id}", s.getChunk)
 	return mux
 }
 
@@ -92,7 +94,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	// disco como archivo temporal por la propia librería estándar. Estos
 	// temps se limpian con el defer.
 	if err := r.ParseMultipartForm(32 << 20); err != nil { // parsemultipartForm procesa los datos del cuerpo HTTP y permite mantener en memoria hasta un umbral de aproximadamente 32 MiB
-		http.Error(w, fmt.Sprintf("invalid multipart: %v", err), http.StatusBadRequest)
+		writeError(w, fmt.Errorf("%w: invalid multipart: %v", storage.ErrBadRequest, err))
 		return
 	}
 	// Obtenemos valores y veriicamos
@@ -101,7 +103,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	hashEsperado := r.FormValue("expected_hash")
 
 	if chunkIDRaw == "" || ownerUserID == "" || hashEsperado == "" {
-		http.Error(w, "required fields are missing: chunk_id, owner_user_id, expected_hash", http.StatusBadRequest)
+		writeError(w, fmt.Errorf("%w: required fields are missing: chunk_id, owner_user_id, expected_hash", storage.ErrBadRequest))
 		return
 	}
 	chunkID := model.ChunkID(chunkIDRaw)
@@ -110,7 +112,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	// por lo que podmeos leer sus bytes progresivamente, con readAll
 	file, _, err := r.FormFile("chunk")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("'chunk' field missing or invalid: %v", err), http.StatusBadRequest)
+		writeError(w, fmt.Errorf("%w: 'chunk' field missing or invalid: %v", storage.ErrBadRequest, err))
 		return
 	}
 	defer file.Close()
@@ -118,7 +120,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	// Leemos chunk (envelope), obteniendo un []byte
 	envelope, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("reading chunk: %v", err), http.StatusInternalServerError)
+		writeError(w, fmt.Errorf("%w: reading chunk: %v", storage.ErrServer, err))
 		return
 	}
 
@@ -130,12 +132,12 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 		// subió debe reintentar con OTRO peer de la lista de
 		// réplicas, no con este mismo (ya quedó documentado en el
 		// OpenAPI).
-		http.Error(w, "the hash does not match: corrupt chunk", http.StatusBadRequest)
+		writeError(w, fmt.Errorf("%w: the hash does not match: corrupt chunk", storage.ErrBadRequest))
 		return
 	}
 
 	if err := s.store.Save(ownerUserID, chunkID, envelope); err != nil {
-		http.Error(w, fmt.Sprintf("saving chunk: %v", err), http.StatusInternalServerError)
+		writeError(w, err) // en Save se manejan errores y respuestas a path transversal.
 		return
 	}
 
@@ -149,4 +151,65 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// getChunk implements GET /chunks/{chunk_id}?owner_user_id=...
+//
+// A GET has no body, so the request carries only identifiers: chunk_id
+// in the path and owner_user_id as a query param. The response body is
+// the raw envelope (nonce + ciphertext+tag) exactly as it was stored.
+// This peer never decrypts it: the client verifies its integrity against
+// the hash the superpeer gave it in /files/get, not against anything
+// this peer says.
+//
+// Flujo:
+// 1. Obtenemos datos en path y query
+// 2. Cargamos, con storage, el chunk con ese userID y chunkID
+// 3. Escribimos headers en el HTTP response
+// 4. Escribimos chunk en HTTP response
+// NOTA: El peer que recibe la respuesta de GET es el encargado de enviar ACK
+func (s *Server) getChunk(w http.ResponseWriter, r *http.Request) {
+	chunkID := model.ChunkID(r.PathValue("chunk_id")) // No se verifica que se haya pasado porque en ruta de handler especificamos chunks/{chunk_id}, entonces si no coindiden con esa estructura, no llegan hasta acá
+	ownerUserID := r.URL.Query().Get("owner_user_id")
+
+	// Explicit check only to give a clear message for a missing param.
+	// The format of both identifiers is validated inside Load.
+	if ownerUserID == "" {
+		writeError(w, fmt.Errorf("%w: missing owner_user_id", storage.ErrBadRequest))
+		return
+	}
+
+	// Load validates both identifiers (path traversal included) before
+	// touching the disk, so there is no extra validation here.
+	envelope, err := s.store.Load(ownerUserID, chunkID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(envelope)))
+
+	if _, err := w.Write(envelope); err != nil {
+		// The status line (e.g. 200 OK) is already sent; all that is left is to log.
+		log.Printf("writing chunk %s: %v", chunkID, err)
+	}
+}
+
+// writeError maps the error category to an HTTP status. The category
+// (ErrBadRequest, ErrNotFound, ErrServer) decides the code; the wrapped
+// message carries the context.
+func writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, storage.ErrBadRequest):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, storage.ErrNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	default:
+		// ErrServer, or any error with no category. The detail is only
+		// logged, never sent to the caller: OS errors usually include
+		// absolute local paths, which should not leave this peer.
+		log.Printf("internal error: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
 }

@@ -34,6 +34,15 @@ type StoredChunk struct {
 // directo, en vez de intentar sanearlo.
 var safeComponent = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// Errores centinela: permiten a quien llama (los handlers) distinguir
+// el tipo de fallo con errors.Is y responder el status HTTP correcto,
+// sin comparar textos de error.
+var (
+	ErrBadRequest = errors.New("bad request")
+	ErrNotFound   = errors.New("not found")
+	ErrServer     = errors.New("internal server error")
+)
+
 // Store es el almacenamiento local de un peer.
 type Store struct {
 	basePath string
@@ -43,7 +52,7 @@ type Store struct {
 // mismo si no existe; cada operación crea las carpetas que necesita bajo demanda.
 func NewStore(basePath string) (*Store, error) {
 	if err := os.MkdirAll(basePath, 0o700); err != nil {
-		return nil, fmt.Errorf("creating basePath %q: %w", basePath, err)
+		return nil, fmt.Errorf("%w: creating basePath %q: %w", ErrServer, basePath, err)
 	}
 	return &Store{basePath: basePath}, nil
 }
@@ -53,23 +62,24 @@ func NewStore(basePath string) (*Store, error) {
 // punto del paquete que sabe cómo se arma la ruta — todas las demás
 // funciones pasan por aquí, para no duplicar la validación en cada
 // una (y correr el riesgo de que a alguna se le olvide).
+// string -> path, error -> mensaje de error, si lo hay, path es vacio.
 func (s *Store) chunkPath(ownerUserID string, chunkID model.ChunkID) (string, error) {
 	// Validate chunkID
 	fileID, err := chunkID.FileID()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: invalid chunk_id %q: %v", ErrBadRequest, chunkID, err)
 	}
 	index, err := chunkID.Index()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: invalid chunk index in %q: %v", ErrBadRequest, chunkID, err)
 	}
 
-	// Validate each part regexs
+	// Validate each part regex
 	if !safeComponent.MatchString(ownerUserID) {
-		return "", fmt.Errorf("ownerUserID contains invalid characters: %q", ownerUserID)
+		return "", fmt.Errorf("%w: ownerUserID does not match required structure: %q", ErrBadRequest, ownerUserID)
 	}
 	if !safeComponent.MatchString(fileID) {
-		return "", fmt.Errorf("fileID contains invalid characters: %q", fileID)
+		return "", fmt.Errorf("%w: fileID does not match required structure: %q", ErrBadRequest, fileID)
 	}
 
 	path := filepath.Join(s.basePath, ownerUserID, fileID, strconv.Itoa(index))
@@ -81,22 +91,23 @@ func (s *Store) chunkPath(ownerUserID string, chunkID model.ChunkID) (string, er
 	// comprobación sigue frenando un path traversal.
 	absBase, err := filepath.Abs(s.basePath) // obtenemos ruta absoluta base (por ejm: user/dfsha/storage/)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrServer, err)
 	}
 	absPath, err := filepath.Abs(path) // Obtenemos ruta absoluta del path construido acá
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrServer, err)
 	}
 
 	// Obtenemos ruta relativa absBase para generar un path relativo, y visualizar de forma clara
 	// si quieren salir de directorio.
 	relPath, err := filepath.Rel(absBase, absPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrServer, err)
 	}
+	// Arriba sí 500 porque son errores al construir o pedir rutas
 
 	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("resulted path outside of basePath: %q", absPath)
+		return "", fmt.Errorf("%w: resulted path outside of basePath: %q", ErrBadRequest, absPath)
 	}
 
 	return absPath, nil
@@ -117,18 +128,18 @@ func (s *Store) chunkPath(ownerUserID string, chunkID model.ChunkID) (string, er
 func (s *Store) Save(ownerUserID string, chunkID model.ChunkID, envelope []byte) error {
 	finalPath, err := s.chunkPath(ownerUserID, chunkID)
 	if err != nil {
-		return err
+		return err // ya viene formateado de chunkPath
 	}
 
 	dir := filepath.Dir(finalPath)
 	// creamos dir con permisos, inicializando err, y luego miramos si no es vacio.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating directory %q: %w", dir, err)
+		return fmt.Errorf("%w: creating directory %q: %w", ErrServer, dir, err)
 	}
 
 	tmp, err := os.CreateTemp(dir, "chunk-*.tmp") // Os reemplaza * por numero aleatorio
 	if err != nil {
-		return fmt.Errorf("creating temporal file: %w", err)
+		return fmt.Errorf("%w: creating temporal file: %w", ErrServer, err)
 	}
 	tmpPath := tmp.Name()
 	// Si algo falla antes del rename exitoso, se borra el temporal
@@ -138,7 +149,7 @@ func (s *Store) Save(ownerUserID string, chunkID model.ChunkID, envelope []byte)
 
 	if _, err := tmp.Write(envelope); err != nil {
 		tmp.Close()
-		return fmt.Errorf("writing temporal chunk: %w", err)
+		return fmt.Errorf("%w: writing temporal chunk: %w", ErrServer, err)
 	}
 	// Sync fuerza el flush a disco antes del rename. Sin esto, el
 	// rename podría completarse mientras los datos siguen en el
@@ -146,14 +157,14 @@ func (s *Store) Save(ownerUserID string, chunkID model.ChunkID, envelope []byte)
 	// "renombrado" pero vacío o incompleto en algunos filesystems.
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return fmt.Errorf("synchronizing temporal chunk: %w", err)
+		return fmt.Errorf("%w: synchronizing temporal chunk: %w", ErrServer, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("closing temporal chunk: %w", err)
+		return fmt.Errorf("%w: closing temporal chunk: %w", ErrServer, err)
 	}
 
 	if err := os.Rename(tmpPath, finalPath); err != nil {
-		return fmt.Errorf("moving chunk to final destination: %w", err)
+		return fmt.Errorf("%w: moving chunk to final destination: %w", ErrServer, err)
 	}
 	return nil
 }
@@ -167,7 +178,7 @@ func (s *Store) Load(ownerUserID string, chunkID model.ChunkID) ([]byte, error) 
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("chunk %s not found: %w", chunkID, err)
+		return nil, fmt.Errorf("%w: chunk %s not found: %w", ErrNotFound, chunkID, err)
 	}
 
 	return data, err
@@ -181,11 +192,13 @@ func (s *Store) Delete(ownerUserID string, chunkID model.ChunkID) error {
 	if err != nil {
 		return err
 	}
+
 	err = os.Remove(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return err
+
+	return fmt.Errorf("%w: removing chunk %q: %v", ErrServer, path, err)
 }
 
 // Exists indica si el chunk está almacenado localmente.
@@ -208,7 +221,7 @@ func (s *Store) FreeSpace() (int64, error) {
 	var stat syscall.Statfs_t
 	// consultamos info de basePath y lo guardamos es stat
 	if err := syscall.Statfs(s.basePath, &stat); err != nil {
-		return 0, fmt.Errorf("consulting free space of %q: %w", s.basePath, err)
+		return 0, fmt.Errorf("%w: consulting free space of %q: %w", ErrServer, s.basePath, err)
 	}
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
@@ -257,7 +270,7 @@ func (s *Store) ListChunkIDs() ([]StoredChunk, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("listing chunks in %q: %w", s.basePath, err)
+		return nil, fmt.Errorf("%w: listing chunks in %q: %v", ErrServer, s.basePath, err)
 	}
 	return chunks, nil
 }

@@ -63,7 +63,7 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
-  /chunks/{chunk_id}:
+  /chunks/{chunk_id}?owner_user_id={owner_user_id}:
     get:
       tags: [chunks]
       summary: Serves a chunk to anyone who requests it
@@ -74,6 +74,12 @@ paths:
           schema:
             type: string
           description: "Identifier in the form: {file_id}_{chunk_index}"
+        - in: query
+          name: owner_user_id
+          required: true
+          schema:
+            type: string
+          description: "Chunk owner, so we can locate it in local storage"
       responses:
         "200":
           description: Chunk found
@@ -102,6 +108,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: owner_user_id
+          required: true
+          schema:
+            type: string
+          description: "Chunk owner, so we can locate it in local storage"
       responses:
         "200":
           description: Deletion started

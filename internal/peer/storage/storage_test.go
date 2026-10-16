@@ -306,3 +306,20 @@ func TestFreeSpace(t *testing.T) {
 		t.Fatalf("FreeSpace() = %d, want non-negative value", free)
 	}
 }
+
+func TestListChunkIDsMissingBasePathReturnsServerError(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	_, err = store.ListChunkIDs()
+	if !errors.Is(err, ErrServer) {
+		t.Fatalf("ListChunkIDs() error = %v, want ErrServer", err)
+	}
+}
