@@ -14,16 +14,22 @@ import (
 	"os"
 	"strconv"
 
-	"dfsha/internal/peer/client"
 	"dfsha/internal/peer/hash"
 	"dfsha/internal/peer/storage"
 	"dfsha/internal/shared/model"
 )
 
+// TODO: Si interface crece, sacarla a archivo aparte
+// superpeerClient define la mínima operación que el peer necesita del
+// superpeer para confirmar que aceptó el chunk.
+type superpeerClient interface {
+	PutAck(chunkID model.ChunkID, peerID string) error
+}
+
 // Server agrupa las dependencias que los handlers necesitan.
 type Server struct {
 	store           *storage.Store // Objeto de pckg storage que permite usar sus funciones
-	superpeerClient *client.SuperpeerClient
+	superpeerClient superpeerClient
 	// peerID identifica a ESTE peer ante el superpeer (el que se
 	// obtuvo en /peers/register). Se necesita para el put/ack: el
 	// superpeer debe saber QUIÉN confirma haber recibido el chunk.
@@ -31,7 +37,7 @@ type Server struct {
 }
 
 // NewServer crea un Server con sus dependencias ya resueltas.
-func NewServer(store *storage.Store, superpeerClient *client.SuperpeerClient, peerID string) *Server {
+func NewServer(store *storage.Store, superpeerClient superpeerClient, peerID string) *Server {
 	return &Server{store: store, superpeerClient: superpeerClient, peerID: peerID}
 }
 
@@ -102,9 +108,9 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	// Obtenemos valores y veriicamos
 	chunkIDRaw := r.FormValue("chunk_id")
 	ownerUserID := r.FormValue("owner_user_id")
-	hashEsperado := r.FormValue("expected_hash")
+	expectedHash := r.FormValue("expected_hash")
 
-	if chunkIDRaw == "" || ownerUserID == "" || hashEsperado == "" {
+	if chunkIDRaw == "" || ownerUserID == "" || expectedHash == "" {
 		writeError(w, fmt.Errorf("%w: required fields are missing: chunk_id, owner_user_id, expected_hash", storage.ErrBadRequest))
 		return
 	}
@@ -129,7 +135,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 	// Verificación de integridad ANTES de tocar disco. El hash es
 	// sobre el envelope completo (nonce + ciphertext+tag), nunca
 	// sobre contenido descifrado — este peer no tiene la clave.
-	if !hash.VerifySHA256(envelope, hashEsperado) {
+	if !hash.VerifySHA256(envelope, expectedHash) {
 		// 400: el chunk llegó corrupto o alterado. El cliente que
 		// subió debe reintentar con OTRO peer de la lista de
 		// réplicas, no con este mismo (ya quedó documentado en el
