@@ -36,11 +36,12 @@ func main() {
 	fsStore := store.NewFsStore()
 	fileStore := store.NewFileStore()
 	lockStore := store.NewLockStore()
+	taskStore := store.NewTaskStore() // borrados pendientes: los escribe files, los entrega el heartbeat de peers
 
 	// Build services
 	authService := auth.NewService(userStore)
-	peerService := peers.NewService(peerStore, fileStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
-	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewHTTPChunkDeleter())
+	peerService := peers.NewService(peerStore, fileStore, taskStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
+	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewTaskChunkDeleter(taskStore))
 	fsService := fs.NewService(fsStore, fileService)
 	lockService := locks.NewService(lockStore, fsStore, 30*time.Second)
 

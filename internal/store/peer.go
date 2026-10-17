@@ -11,7 +11,7 @@ type Peer struct {
 	PeerID         string
 	Address        string
 	Port           string
-	AvailableSpace string
+	AvailableSpace int64 // free bytes reported in the last heartbeat
 	Chunks         []string
 	LastSeen       time.Time
 	IsHealthy      bool
@@ -39,7 +39,7 @@ func (s *PeerStore) Add(p *Peer) {
 
 // UpdateHeartbeat refreshes the LastSeen timestamp and updates peer state
 // Returns false if the peer does not exist
-func (s *PeerStore) UpdateHeartbeat(peerID, availableSpace string, chunks []string) bool {
+func (s *PeerStore) UpdateHeartbeat(peerID string, availableSpace int64, chunks []string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

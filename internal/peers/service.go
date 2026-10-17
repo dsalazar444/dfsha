@@ -13,27 +13,37 @@ import (
 
 var ErrPeerNotFound = errors.New("peer not found")
 
-// ReplicationTask instructs a peer to pull a chunk from a healthy replica peer
+// Acciones posibles de una tarea (mismos valores que model.ReplicationAction del peer)
+const (
+	ActionGet    = "GET"    // replicar: bajar el chunk de alguna de las SourceURLs y guardarlo
+	ActionDelete = "DELETE" // borrar el chunk del disco del peer
+)
+
+// ReplicationTask es una orden que el peer recibe en la respuesta de su heartbeat.
+// El formato es el del contrato (superpeer-openapi.yaml) y el de model.ReplicationTask del peer
 type ReplicationTask struct {
-	Action        string `json:"action"` // "replicate"
-	ChunkID       string `json:"chunk_id"`
-	SourcePeerURL string `json:"source_peer_url"`
-	ExpectedHash  string `json:"expected_hash"`
+	Action       string   `json:"action"`        // ActionGet o ActionDelete
+	ChunkID      string   `json:"chunk_id"`      // chunk sobre el que actuar
+	OwnerUserID  string   `json:"owner_user_id"` // el peer lo necesita para armar la ruta en disco
+	SourceURLs   []string `json:"source_urls"`   // GET: peers de donde bajarlo (en orden de preferencia); DELETE: vacío
+	ExpectedHash string   `json:"expected_hash"` // GET: hash para verificar lo descargado; DELETE: vacío
 }
 
 // Service manages peer logic, health monitoring, and re-replication task dispatching
 type Service struct {
 	store      *store.PeerStore
 	fileStore  *store.FileStore
+	taskStore  *store.TaskStore // tareas de borrado pendientes que se entregan en el heartbeat
 	timeout    time.Duration
 	replFactor int
 }
 
 // NewService creates a new peers Service
-func NewService(store *store.PeerStore, fileStore *store.FileStore, timeout time.Duration, replFactor int) *Service {
+func NewService(store *store.PeerStore, fileStore *store.FileStore, taskStore *store.TaskStore, timeout time.Duration, replFactor int) *Service {
 	return &Service{
 		store:      store,
 		fileStore:  fileStore,
+		taskStore:  taskStore,
 		timeout:    timeout,
 		replFactor: replFactor,
 	}
@@ -54,14 +64,38 @@ func (s *Service) Register(address, port string) string {
 	return peerID
 }
 
-// Heartbeat processes an incoming heartbeat from a peer and returns any pending replication tasks
-func (s *Service) Heartbeat(peerID, availableSpace string, chunks []string) ([]ReplicationTask, error) {
+// Heartbeat processes an incoming heartbeat from a peer and returns its pending tasks:
+// first the deletions, then the replications
+func (s *Service) Heartbeat(peerID string, availableSpace int64, chunks []string) ([]ReplicationTask, error) {
 	ok := s.store.UpdateHeartbeat(peerID, availableSpace, chunks)
 	if !ok {
 		return nil, ErrPeerNotFound
 	}
+	peerURL := s.store.GetPeerURL(peerID)
 
-	tasks := s.checkReplicationTasks(peerID)
+	// 1. La lista de chunks del heartbeat es la verdad sobre lo que tiene el peer:
+	//    actualiza AckedPeers antes de decidir la replicación
+	if s.fileStore != nil {
+		s.fileStore.SyncPeerChunks(peerURL, chunks)
+	}
+
+	// 2. Borrados: los que el peer ya cumplió (el chunk dejó de aparecer) se quitan,
+	//    y los que siguen pendientes se le vuelven a mandar
+	var tasks []ReplicationTask
+	if s.taskStore != nil {
+		s.taskStore.CompleteDeletes(peerURL, chunks)
+		for _, del := range s.taskStore.PendingDeletes(peerURL) {
+			tasks = append(tasks, ReplicationTask{
+				Action:      ActionDelete,
+				ChunkID:     del.ChunkID,
+				OwnerUserID: del.OwnerUserID,
+				SourceURLs:  []string{}, // el contrato lo pide siempre; en un borrado va vacío
+			})
+		}
+	}
+
+	// 3. Replicación (lógica de Sahian): chunks con menos réplicas sanas de las necesarias
+	tasks = append(tasks, s.checkReplicationTasks(peerID)...)
 	return tasks, nil
 }
 
@@ -105,20 +139,19 @@ func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
 			// If the caller is not assigned to this chunk, and the chunk is under-replicated,
 			// and there is at least one healthy replica to copy from:
 			if !alreadyAssignedToCaller && len(healthyReplicas) > 0 && len(healthyReplicas) < s.replFactor {
-				// Pick the first healthy replica as source
-				sourceURL := healthyReplicas[0]
-
 				// Register this peer as assigned for this chunk in FileStore so it can put/ack it later
 				s.fileStore.AddPeerAssignment(chunk.ChunkID, peerURL)
 
+				// Todas las réplicas sanas van como fuentes: el peer prueba una por una hasta que alguna responda
 				task := ReplicationTask{
-					Action:        "replicate",
-					ChunkID:       chunk.ChunkID,
-					SourcePeerURL: sourceURL,
-					ExpectedHash:  chunk.ExpectedHash,
+					Action:       ActionGet,
+					ChunkID:      chunk.ChunkID,
+					OwnerUserID:  file.OwnerUserID,
+					SourceURLs:   healthyReplicas,
+					ExpectedHash: chunk.ExpectedHash,
 				}
 				tasks = append(tasks, task)
-				log.Printf("[peers] Assigned replication task to peer %s for chunk %s from %s", peerID, chunk.ChunkID, sourceURL)
+				log.Printf("[peers] Assigned replication task to peer %s for chunk %s from %v", peerID, chunk.ChunkID, healthyReplicas)
 
 				// Limit to at most 3 tasks per heartbeat to avoid overwhelming the peer
 				if len(tasks) >= 3 {
