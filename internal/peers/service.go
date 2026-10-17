@@ -13,17 +13,29 @@ import (
 
 var ErrPeerNotFound = errors.New("peer not found")
 
-// Service manages peer logic and health monitoring
+// ReplicationTask instructs a peer to pull a chunk from a healthy replica peer
+type ReplicationTask struct {
+	Action        string `json:"action"` // "replicate"
+	ChunkID       string `json:"chunk_id"`
+	SourcePeerURL string `json:"source_peer_url"`
+	ExpectedHash  string `json:"expected_hash"`
+}
+
+// Service manages peer logic, health monitoring, and re-replication task dispatching
 type Service struct {
-	store   *store.PeerStore
-	timeout time.Duration
+	store      *store.PeerStore
+	fileStore  *store.FileStore
+	timeout    time.Duration
+	replFactor int
 }
 
 // NewService creates a new peers Service
-func NewService(store *store.PeerStore, timeout time.Duration) *Service {
+func NewService(store *store.PeerStore, fileStore *store.FileStore, timeout time.Duration, replFactor int) *Service {
 	return &Service{
-		store:   store,
-		timeout: timeout,
+		store:      store,
+		fileStore:  fileStore,
+		timeout:    timeout,
+		replFactor: replFactor,
 	}
 }
 
@@ -42,13 +54,81 @@ func (s *Service) Register(address, port string) string {
 	return peerID
 }
 
-// Heartbeat processes an incoming heartbeat from a peer
-func (s *Service) Heartbeat(peerID, availableSpace string, chunks []string) error {
+// Heartbeat processes an incoming heartbeat from a peer and returns any pending replication tasks
+func (s *Service) Heartbeat(peerID, availableSpace string, chunks []string) ([]ReplicationTask, error) {
 	ok := s.store.UpdateHeartbeat(peerID, availableSpace, chunks)
 	if !ok {
-		return ErrPeerNotFound
+		return nil, ErrPeerNotFound
 	}
-	return nil
+
+	tasks := s.checkReplicationTasks(peerID)
+	return tasks, nil
+}
+
+// checkReplicationTasks inspects all chunks in the system
+// If any chunk has fewer healthy replicas than replFactor, and the current peer does not hold or is not assigned to it,
+// assign this peer to pull the chunk from an available healthy replica
+func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
+	if s.fileStore == nil || s.replFactor <= 1 {
+		return nil
+	}
+
+	peerURL := s.store.GetPeerURL(peerID)
+	if peerURL == "" {
+		return nil
+	}
+
+	// Map of healthy peer URLs
+	healthyURLs := make(map[string]bool)
+	for _, p := range s.store.GetHealthyPeers() {
+		healthyURLs[p.URL()] = true
+	}
+
+	var tasks []ReplicationTask
+	files := s.fileStore.GetAllFiles()
+
+	for _, file := range files {
+		for _, chunk := range file.Chunks {
+			// Find healthy replicas for this chunk
+			var healthyReplicas []string
+			alreadyAssignedToCaller := false
+
+			for _, pURL := range chunk.Peers {
+				if pURL == peerURL {
+					alreadyAssignedToCaller = true
+				}
+				if healthyURLs[pURL] {
+					healthyReplicas = append(healthyReplicas, pURL)
+				}
+			}
+
+			// If the caller is not assigned to this chunk, and the chunk is under-replicated,
+			// and there is at least one healthy replica to copy from:
+			if !alreadyAssignedToCaller && len(healthyReplicas) > 0 && len(healthyReplicas) < s.replFactor {
+				// Pick the first healthy replica as source
+				sourceURL := healthyReplicas[0]
+
+				// Register this peer as assigned for this chunk in FileStore so it can put/ack it later
+				s.fileStore.AddPeerAssignment(chunk.ChunkID, peerURL)
+
+				task := ReplicationTask{
+					Action:        "replicate",
+					ChunkID:       chunk.ChunkID,
+					SourcePeerURL: sourceURL,
+					ExpectedHash:  chunk.ExpectedHash,
+				}
+				tasks = append(tasks, task)
+				log.Printf("[peers] Assigned replication task to peer %s for chunk %s from %s", peerID, chunk.ChunkID, sourceURL)
+
+				// Limit to at most 3 tasks per heartbeat to avoid overwhelming the peer
+				if len(tasks) >= 3 {
+					return tasks
+				}
+			}
+		}
+	}
+
+	return tasks
 }
 
 // StartHealthMonitor periodically sweeps the PeerStore to mark unresponsive

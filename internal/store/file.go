@@ -50,6 +50,43 @@ func (s *FileStore) AddFile(file *FileMeta) {
 	s.byFile[file.FileID] = file
 }
 
+// GetAllFiles returns copies of all registered files
+func (s *FileStore) GetAllFiles() []*FileMeta {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*FileMeta, 0, len(s.byFile))
+	for _, file := range s.byFile {
+		fileCopy := *file
+		fileCopy.Chunks = make([]*ChunkMeta, len(file.Chunks))
+		for i, chunk := range file.Chunks {
+			chunkCopy := *chunk
+			chunkCopy.Peers = slices.Clone(chunk.Peers)
+			chunkCopy.AckedPeers = slices.Clone(chunk.AckedPeers)
+			fileCopy.Chunks[i] = &chunkCopy
+		}
+		result = append(result, &fileCopy)
+	}
+	return result
+}
+
+// AddPeerAssignment registers an additional peer as an assigned replica for a chunk
+func (s *FileStore) AddPeerAssignment(chunkID, peerURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, file := range s.byFile {
+		for _, chunk := range file.Chunks {
+			if chunk.ChunkID == chunkID {
+				if !slices.Contains(chunk.Peers, peerURL) {
+					chunk.Peers = append(chunk.Peers, peerURL)
+				}
+				return
+			}
+		}
+	}
+}
+
 // GetFile retrieves metadata for a specific file
 // It returns a copy, so the caller can read it while AckChunk keeps updating the store
 func (s *FileStore) GetFile(fileID string) (*FileMeta, bool) {
