@@ -16,6 +16,7 @@ type User struct {
 	UserID       string
 	Username     string
 	PasswordHash string // bcrypt hash (plaintext is never stored)
+	Salt         string // Unique random salt (hex string) for key derivation
 }
 
 // UserStore is a thread-safe in-memory collection of users
@@ -50,14 +51,15 @@ type seedEntry struct {
 	id       string
 	username string
 	password string // plaintext (only used to generate the hash at startup)
+	salt     string // unique salt per user
 }
 
 // seed populates the store with development users
 // Panics on bcrypt failure rather than starting with an empty store
 func (s *UserStore) seed() {
 	entries := []seedEntry{
-		{id: "user-001", username: "alice", password: "alice1234"},
-		{id: "user-002", username: "bob", password: "bob1234"},
+		{id: "user-001", username: "alice", password: "alice1234", salt: "a1f0d2c3e4b567890123456789abcdef"},
+		{id: "user-002", username: "bob", password: "bob1234", salt: "b2e1c4d5f6a789012345678901bcdefa"},
 	}
 
 	for _, e := range entries {
@@ -69,6 +71,7 @@ func (s *UserStore) seed() {
 			UserID:       e.id,
 			Username:     e.username,
 			PasswordHash: string(hash),
+			Salt:         e.salt,
 		}
 	}
 }
