@@ -51,10 +51,33 @@ func (s *FileStore) AddFile(file *FileMeta) {
 }
 
 // GetFile retrieves metadata for a specific file
+// It returns a copy, so the caller can read it while AckChunk keeps updating the store
 func (s *FileStore) GetFile(fileID string) (*FileMeta, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	file, ok := s.byFile[fileID]
+	if !ok {
+		return nil, false
+	}
+
+	fileCopy := *file
+	fileCopy.Chunks = make([]*ChunkMeta, len(file.Chunks))
+	for i, chunk := range file.Chunks {
+		chunkCopy := *chunk
+		chunkCopy.Peers = slices.Clone(chunk.Peers)
+		chunkCopy.AckedPeers = slices.Clone(chunk.AckedPeers)
+		fileCopy.Chunks[i] = &chunkCopy
+	}
+	return &fileCopy, true
+}
+
+// RemoveFile deletes the metadata of a file and returns it
+// The bool is false if the file_id was not registered
+func (s *FileStore) RemoveFile(fileID string) (*FileMeta, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.byFile[fileID]
+	delete(s.byFile, fileID)
 	return file, ok
 }
 

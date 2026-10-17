@@ -91,14 +91,20 @@ func (s *PeerStore) GetHealthyPeers() []*Peer {
 	return healthy
 }
 
+// URL returns the base URL (http://address:port) where the peer can be reached
+// It is the only place that builds peer URLs (switch to https here when TLS arrives)
+func (p *Peer) URL() string {
+	return "http://" + p.Address + ":" + p.Port
+}
+
 // GetPeerURL returns the formatted URL (http://address:port) for a given peerID
 // Returns empty string if the peer is not found
 func (s *PeerStore) GetPeerURL(peerID string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	if p, ok := s.byID[peerID]; ok {
-		return "http://" + p.Address + ":" + p.Port
+		return p.URL()
 	}
 	return ""
 }

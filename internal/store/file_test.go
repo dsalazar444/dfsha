@@ -28,3 +28,27 @@ func TestAckChunk(t *testing.T) {
 		t.Fatalf("unknown chunk: got %v, want ErrChunkNotFound", err)
 	}
 }
+
+func TestRmdirReturnsFileIDsInside(t *testing.T) {
+	s := NewFsStore()
+	for _, dir := range []string{"/docs", "/docs/tesis"} {
+		if err := s.Mkdir("u1", dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.CreateFile("u1", "/docs/a.txt", "fileA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateFile("u1", "/docs/tesis/b.txt", "fileB"); err != nil {
+		t.Fatal(err)
+	}
+
+	fileIDs, err := s.Rmdir("u1", "/docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(fileIDs)
+	if !slices.Equal(fileIDs, []string{"fileA", "fileB"}) {
+		t.Fatalf("file ids = %v, want fileA and fileB", fileIDs)
+	}
+}
