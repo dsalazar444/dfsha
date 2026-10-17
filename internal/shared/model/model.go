@@ -66,25 +66,25 @@ func (c ChunkID) Index() (int, error) { // getIndex
 // cliente recibe esto, los peers listados AÚN NO TIENEN el chunk —
 // es una asignación a futuro, no una confirmación.
 type ChunkAssignment struct {
-	ChunkID ChunkID
+	ChunkID ChunkID `json:"chunk_id"`
 	// PeerURLs son los destinos elegidos por el superpeer según el
 	// factor de replicación (ej. 2 URLs si la replicación es 2).
-	PeerURLs []string
+	PeerURLs []string `json:"destination_peers"`
 }
 
 // Request para POST files/put/init del SP
 type PutInitRequest struct {
-	LogicalPath  string
-	ChunkCount   int
-	HashPerChunk []string
+	FileID       string   `json:"file_id"`
+	LogicalPath  string   `json:"logical_path"`
+	ChunkCount   int      `json:"chunk_count"`
+	HashPerChunk []string `json:"hash_per_chunk"`
 }
 
 // Es la respuesta completa de POST /files/put/init del SP. Contiene los chunkAssig. de un file
 type PutInitResponse struct {
-	// FileID es generado por el superpeer; el peer lo necesita para
+	// TODO: FileID es generado por el superpeer; el peer lo necesita para
 	// construir cada ChunkID al subir y para el ack posterior.
-	FileID     string
-	Assignment []ChunkAssignment
+	Assignment []ChunkAssignment `json:"assignment"`
 }
 
 // ChunkLocation es el HECHO CONFIRMADO que devuelve el superpeer en
@@ -92,33 +92,33 @@ type PutInitResponse struct {
 // mandaron su put/ack para ese chunk aparecen aquí). A diferencia de
 // ChunkAssignment, esto no es una instrucción, es el estado actual.
 type ChunkLocation struct {
-	ChunkID      ChunkID
-	PeerURLs     []string
-	ExpectedHash string // hash declarado por el dueño en put/init; fuente confiable, no viene del peer que sirve el chunk
+	ChunkID      ChunkID  `json:"chunk_id"`
+	PeerURLs     []string `json:"peers"`
+	ExpectedHash string   `json:"hash"` // hash declarado por el dueño en put/init; fuente confiable, no viene del peer que sirve el chunk
 }
 
 // Es la respuesta completa de GET /files/get/{ruta}. Contiene todas las ubicaciones de todos
 // los chunks de un FileID
 type GetFileResponse struct {
-	FileID string
-	Chunks []ChunkLocation
+	FileID string          `json:"file_id"`
+	Chunks []ChunkLocation `json:"chunks"`
 }
 
 // es lo que el peer manda periódicamente a POST /peers/heartbeat para reportar
 // que sigue vivo y en qué estado.
 type HeartbeatPayload struct {
-	PeerID string
+	PeerID string `json:"peer_id"`
 	// FreeSpace en bytes; el superpeer lo usa para decidir a qué peer
 	// asignar nuevos chunks (prioriza el que tenga más espacio libre).
-	FreeSpace int64
+	FreeSpace int64 `json:"available_space"`
 	// Chunks: todos los ChunkID que este peer tiene almacenados
 	// actualmente. Le sirve al superpeer para detectar inconsistencias
 	// (ej. un chunk que el superpeer cree perdido pero el peer sí tiene).
-	Chunks []ChunkID
+	Chunks []ChunkID `json:"chunks"`
 }
 
 type HeartbeatResponse struct {
-	Tasks []ReplicationTask
+	Tasks []ReplicationTask `json:"tasks"`
 }
 
 // ReplicationAction identifies what the peer must do for a task.
@@ -130,31 +130,31 @@ const (
 )
 
 type ReplicationTask struct {
-	Action       ReplicationAction // Indicates if it is GET or DELETE
-	ChunkID      ChunkID  // chunkID a solicitar
-	OwnerUserID  string   // owner para armar path de chunk
-	SourceURLs   []string // urls de peers a pedir chunk
-	ExpectedHash string   // hash confiable de chunk
+	Action       ReplicationAction `json:"action"`        // Indicates if it is GET or DELETE
+	ChunkID      ChunkID           `json:"chunk_id"`      // chunkID a solicitar
+	OwnerUserID  string            `json:"owner_user_id"` // owner para armar path de chunk
+	SourceURLs   []string          `json:"source_urls"`   // urls de peers a pedir chunk
+	ExpectedHash string            `json:"expected_hash"` // hash confiable de chunk
 }
 
 // Es la respuesta de POST /files/lock/{ruta} de SP
 type LockResponse struct {
-	LockID string
+	LockID string `json:"lock_id"`
 	// ExpiresAt es el TTL del lock: si el cliente no hace unlock antes
 	// de esta hora, el superpeer lo libera automáticamente (evita locks
 	// huérfanos si el cliente se cae a mitad de una edición).
-	ExpiresAt time.Time
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // Es el request para el POST /auth/login.
 type LoginRequest struct {
-	Username string
-	Password string
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // LoginResponse es la respuesta de POST /auth/login.
 type LoginResponse struct {
-	Token  string
-	UserID string
-	Salt   string // salt de Argon2id, para derivar la clave maestra localmente
+	Token  string `json:"session_token"`
+	UserID string `json:"user_id"`
+	Salt   string `json:"salt"` // salt de Argon2id, para derivar la clave maestra localmente
 }
