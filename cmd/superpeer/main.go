@@ -38,8 +38,8 @@ func main() {
 	// Build services
 	authService := auth.NewService(userStore)
 	peerService := peers.NewService(peerStore, cfg.HeartbeatTimeout)
-	fsService := fs.NewService(fsStore)
-	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor)
+	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewHTTPChunkDeleter())
+	fsService := fs.NewService(fsStore, fileService)
 
 	// Build HTTP handlers
 	authHandler := auth.NewHandler(authService)
