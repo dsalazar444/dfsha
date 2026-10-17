@@ -4,6 +4,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"sync"
 )
 
@@ -18,6 +19,7 @@ type ChunkMeta struct {
 	ChunkID      string
 	ExpectedHash string
 	Peers        []string // List of peer URLs assigned to host this chunk
+	AckedPeers   []string // Subset of Peers that confirmed (put/ack) they hold the chunk
 }
 
 // FileMeta tracks the chunks belonging to a logical file
@@ -57,9 +59,10 @@ func (s *FileStore) GetFile(fileID string) (*FileMeta, bool) {
 }
 
 // AckChunk confirms that an assigned peer successfully received and saved a chunk
+// and records the confirmation in AckedPeers (idempotent: a repeated ACK is a no-op)
 func (s *FileStore) AckChunk(chunkID, peerURL string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// chunkID format: {file_id}_{index}
 	for _, file := range s.byFile {
@@ -68,6 +71,9 @@ func (s *FileStore) AckChunk(chunkID, peerURL string) error {
 				// Verify the peerURL is in the list of assigned peers for this chunk
 				for _, assignedURL := range chunk.Peers {
 					if assignedURL == peerURL {
+						if !slices.Contains(chunk.AckedPeers, peerURL) {
+							chunk.AckedPeers = append(chunk.AckedPeers, peerURL)
+						}
 						return nil // Match found, valid ACK
 					}
 				}
