@@ -4,6 +4,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"sync"
 )
 
@@ -18,6 +19,7 @@ type ChunkMeta struct {
 	ChunkID      string
 	ExpectedHash string
 	Peers        []string // List of peer URLs assigned to host this chunk
+	AckedPeers   []string // Subset of Peers that confirmed (put/ack) they hold the chunk
 }
 
 // FileMeta tracks the chunks belonging to a logical file
@@ -49,17 +51,41 @@ func (s *FileStore) AddFile(file *FileMeta) {
 }
 
 // GetFile retrieves metadata for a specific file
+// It returns a copy, so the caller can read it while AckChunk keeps updating the store
 func (s *FileStore) GetFile(fileID string) (*FileMeta, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	file, ok := s.byFile[fileID]
+	if !ok {
+		return nil, false
+	}
+
+	fileCopy := *file
+	fileCopy.Chunks = make([]*ChunkMeta, len(file.Chunks))
+	for i, chunk := range file.Chunks {
+		chunkCopy := *chunk
+		chunkCopy.Peers = slices.Clone(chunk.Peers)
+		chunkCopy.AckedPeers = slices.Clone(chunk.AckedPeers)
+		fileCopy.Chunks[i] = &chunkCopy
+	}
+	return &fileCopy, true
+}
+
+// RemoveFile deletes the metadata of a file and returns it
+// The bool is false if the file_id was not registered
+func (s *FileStore) RemoveFile(fileID string) (*FileMeta, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.byFile[fileID]
+	delete(s.byFile, fileID)
 	return file, ok
 }
 
 // AckChunk confirms that an assigned peer successfully received and saved a chunk
+// and records the confirmation in AckedPeers (idempotent: a repeated ACK is a no-op)
 func (s *FileStore) AckChunk(chunkID, peerURL string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// chunkID format: {file_id}_{index}
 	for _, file := range s.byFile {
@@ -68,6 +94,9 @@ func (s *FileStore) AckChunk(chunkID, peerURL string) error {
 				// Verify the peerURL is in the list of assigned peers for this chunk
 				for _, assignedURL := range chunk.Peers {
 					if assignedURL == peerURL {
+						if !slices.Contains(chunk.AckedPeers, peerURL) {
+							chunk.AckedPeers = append(chunk.AckedPeers, peerURL)
+						}
 						return nil // Match found, valid ACK
 					}
 				}

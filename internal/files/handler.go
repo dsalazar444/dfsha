@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler holds the HTTP handlers for file endpoints
@@ -110,6 +112,67 @@ func (h *Handler) PutAck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// Get handles GET /files/get/{path}
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	fileID, chunks, err := h.service.Get(userID, logicalPath(r))
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"file_id": fileID,
+		"chunks":  chunks,
+	})
+}
+
+// Delete handles DELETE /files/{path}
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.service.Delete(userID, logicalPath(r)); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Starting file deletion"})
+}
+
+// logicalPath returns the file path captured by the "*" route wildcard as an absolute path
+// (the superpeer always works with absolute paths, the URL has no leading slash)
+func logicalPath(r *http.Request) string {
+	return "/" + chi.URLParam(r, "*")
+}
+
+// isNotFound tells if the error means that the path does not lead to a file
+func isNotFound(err error) bool {
+	return errors.Is(err, store.ErrPathNotFound) ||
+		errors.Is(err, store.ErrNotADirectory) ||
+		errors.Is(err, store.ErrFileNotFound)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
