@@ -105,25 +105,39 @@ func (s *FsStore) Mkdir(userID, logicalPath string) error {
 }
 
 // Rmdir removes a directory and all its contents recursively
-func (s *FsStore) Rmdir(userID, logicalPath string) error {
+// It returns the file_id of every file that was inside, so the caller can delete their data too
+func (s *FsStore) Rmdir(userID, logicalPath string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	parent, childName, err := s.traverse(userID, logicalPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	target, exists := parent.Children[childName]
 	if !exists {
-		return ErrPathNotFound
+		return nil, ErrPathNotFound
 	}
 	if target.Type != NodeTypeDirectory {
-		return ErrNotADirectory
+		return nil, ErrNotADirectory
 	}
 
 	delete(parent.Children, childName)
-	return nil
+	return collectFileIDs(target), nil
+}
+
+// collectFileIDs returns the file_id of every file in the subtree of node
+func collectFileIDs(node *FsNode) []string {
+	if node.Type == NodeTypeFile {
+		return []string{node.FileID}
+	}
+
+	var fileIDs []string
+	for _, child := range node.Children {
+		fileIDs = append(fileIDs, collectFileIDs(child)...)
+	}
+	return fileIDs
 }
 
 // Ls returns the children of a given directory
@@ -163,6 +177,45 @@ func (s *FsStore) Ls(userID, logicalPath string) ([]*FsNode, error) {
 	return children, nil
 }
 
+
+// RemoveFile removes the file node at logicalPath and returns its file_id
+// Fails with ErrPathNotFound if the path does not exist or is not a file
+func (s *FsStore) RemoveFile(userID, logicalPath string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	parent, childName, err := s.traverse(userID, logicalPath)
+	if err != nil {
+		return "", err
+	}
+
+	target, exists := parent.Children[childName]
+	if !exists || target.Type != NodeTypeFile {
+		return "", ErrPathNotFound
+	}
+
+	delete(parent.Children, childName)
+	return target.FileID, nil
+}
+
+// Lookup returns the file_id of the file at logicalPath
+// Fails with ErrPathNotFound if the path does not exist or is not a file
+func (s *FsStore) Lookup(userID, logicalPath string) (string, error) {
+	// Write lock because traverse may create the user's root directory
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	parent, childName, err := s.traverse(userID, logicalPath)
+	if err != nil {
+		return "", err
+	}
+
+	target, exists := parent.Children[childName]
+	if !exists || target.Type != NodeTypeFile {
+		return "", ErrPathNotFound
+	}
+	return target.FileID, nil
+}
 
 // CreateFile creates a new file node in the filesystem
 // Fails if the parent doesn't exist or if the path already exists
