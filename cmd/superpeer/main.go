@@ -9,6 +9,7 @@ import (
 	"dfsha/internal/config"
 	"dfsha/internal/files"
 	"dfsha/internal/fs"
+	"dfsha/internal/locks"
 	"dfsha/internal/peers"
 	"dfsha/internal/server"
 	"dfsha/internal/store"
@@ -34,21 +35,24 @@ func main() {
 	peerStore := store.NewPeerStore()
 	fsStore := store.NewFsStore()
 	fileStore := store.NewFileStore()
+	lockStore := store.NewLockStore()
 
 	// Build services
 	authService := auth.NewService(userStore)
-	peerService := peers.NewService(peerStore, cfg.HeartbeatTimeout)
+	peerService := peers.NewService(peerStore, fileStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
 	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewHTTPChunkDeleter())
 	fsService := fs.NewService(fsStore, fileService)
+	lockService := locks.NewService(lockStore, fsStore, 30*time.Second)
 
 	// Build HTTP handlers
 	authHandler := auth.NewHandler(authService)
 	peerHandler := peers.NewHandler(peerService)
 	fsHandler := fs.NewHandler(fsService)
 	fileHandler := files.NewHandler(fileService)
+	lockHandler := locks.NewHandler(lockService)
 
 	// Build the HTTP router with all routes registered
-	router := server.NewRouter(cfg, authService, authHandler, peerHandler, fsHandler, fileHandler)
+	router := server.NewRouter(cfg, authService, authHandler, peerHandler, fsHandler, fileHandler, lockHandler)
 
 	// Configure the HTTP server
 	httpServer := &http.Server{
@@ -63,6 +67,7 @@ func main() {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel() // ensure tasks are cancelled on exit
 	peerService.StartHealthMonitor(bgCtx)
+	lockService.StartExpirySweeper(bgCtx)
 
 	// Start listening in a goroutine so we can handle shutdown signals
 	serverErr := make(chan error, 1)

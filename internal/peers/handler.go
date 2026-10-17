@@ -76,7 +76,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		body.Chunks = []string{}
 	}
 
-	err := h.service.Heartbeat(body.PeerID, body.AvailableSpace, body.Chunks)
+	tasks, err := h.service.Heartbeat(body.PeerID, body.AvailableSpace, body.Chunks)
 	if err != nil {
 		if errors.Is(err, ErrPeerNotFound) {
 			writeError(w, http.StatusNotFound, "peer not registered")
@@ -86,7 +86,15 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if tasks == nil {
+		tasks = []ReplicationTask{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"tasks":  tasks,
+	})
 }
 
 // writeError writes {"error": msg} with the given HTTP status code.

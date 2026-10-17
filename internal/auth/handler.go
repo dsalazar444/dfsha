@@ -41,7 +41,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.service.Login(body.Username, body.Password)
+	result, err := h.service.Login(body.Username, body.Password)
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
@@ -53,7 +53,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"session_token": token})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"session_token": result.SessionToken,
+		"user_id":       result.UserID,
+		"salt":          result.Salt,
+	})
 }
 
 // writeError writes {"error": msg} with the given HTTP status code

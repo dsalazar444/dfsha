@@ -46,8 +46,15 @@ func NewService(users *store.UserStore) *Service {
 	}
 }
 
-// Login validates credentials and returns a session token, using constant-time comparison to prevent timing attacks
-func (s *Service) Login(username, password string) (string, error) {
+// LoginResult holds the authentication response metadata
+type LoginResult struct {
+	SessionToken string
+	UserID       string
+	Salt         string
+}
+
+// Login validates credentials and returns a session token, user ID, and salt
+func (s *Service) Login(username, password string) (*LoginResult, error) {
 	user, ok := s.users.FindByUsername(username)
 	if !ok {
 		// Run dummy bcrypt hash to prevent timing-based user enumeration
@@ -55,16 +62,16 @@ func (s *Service) Login(username, password string) (string, error) {
 			[]byte("$2a$10$dummydummydummydummyduu1Xp3k7hXi5MCb7c1IZ6ySB34pqVlrO"),
 			[]byte(password),
 		)
-		return "", ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return "", ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	token, err := generateToken()
 	if err != nil {
-		return "", fmt.Errorf("generating session token: %w", err)
+		return nil, fmt.Errorf("generating session token: %w", err)
 	}
 
 	s.mu.Lock()
@@ -74,7 +81,11 @@ func (s *Service) Login(username, password string) (string, error) {
 	}
 	s.mu.Unlock()
 
-	return token, nil
+	return &LoginResult{
+		SessionToken: token,
+		UserID:       user.UserID,
+		Salt:         user.Salt,
+	}, nil
 }
 
 // UserIDByToken validates the token and returns its userID, or "", false if invalid or expired
