@@ -128,7 +128,38 @@ paths:
                     type: string
       responses:
         "200":
-          description: Heartbeat received
+            description: Heartbeat received successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  required: [tasks]
+                  properties:
+                    tasks:
+                      type: array
+                      items:
+                        type: object
+                        required: [action, chunk_id, owner_user_id, source_urls]
+                        properties:
+                          action: 
+                            type: string
+                            description: Indicates action GET or DELETE
+                          chunk_id:
+                            type: string
+                            description: Identifier of the chunk to replicate
+                          owner_user_id:
+                            type: string
+                            description: ID of the user who owns the chunk
+                          expected_hash:
+                            type: string
+                            description: Expected hash of chunk 
+                          source_urls:
+                            type: array
+                            items:
+                              type: string
+                              format: uri
+                            description: URLs of peers from which the chunk can be fetched
+                            example: "[170.0.0.1:5000, 170.0.0.1:5001, ...]"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":

@@ -117,6 +117,26 @@ type HeartbeatPayload struct {
 	Chunks []ChunkID
 }
 
+type HeartbeatResponse struct {
+	Tasks []ReplicationTask
+}
+
+// ReplicationAction identifies what the peer must do for a task.
+type ReplicationAction string
+
+const (
+	ReplicationActionGet    ReplicationAction = "GET"
+	ReplicationActionDelete ReplicationAction = "DELETE"
+)
+
+type ReplicationTask struct {
+	Action       ReplicationAction // Indicates if it is GET or DELETE
+	ChunkID      ChunkID  // chunkID a solicitar
+	OwnerUserID  string   // owner para armar path de chunk
+	SourceURLs   []string // urls de peers a pedir chunk
+	ExpectedHash string   // hash confiable de chunk
+}
+
 // Es la respuesta de POST /files/lock/{ruta} de SP
 type LockResponse struct {
 	LockID string

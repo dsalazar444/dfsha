@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"dfsha/internal/shared/model"
@@ -321,5 +322,69 @@ func TestListChunkIDsMissingBasePathReturnsServerError(t *testing.T) {
 	_, err = store.ListChunkIDs()
 	if !errors.Is(err, ErrServer) {
 		t.Fatalf("ListChunkIDs() error = %v, want ErrServer", err)
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	const workers = 16
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			owner := "user123"
+			chunkID := model.NewChunkID("thesis", i)
+			payload := []byte{byte(i), byte(i + 1), byte(i + 2)}
+
+			if err := store.Save(owner, chunkID, payload); err != nil {
+				errCh <- err
+				return
+			}
+
+			got, err := store.Load(owner, chunkID)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			if !bytes.Equal(got, payload) {
+				errCh <- errors.New("loaded payload differs from saved payload")
+				return
+			}
+
+			if !store.Exists(owner, chunkID) {
+				errCh <- errors.New("Exists() returned false for stored chunk")
+				return
+			}
+
+			if err := store.Delete(owner, chunkID); err != nil {
+				errCh <- err
+				return
+			}
+
+			if store.Exists(owner, chunkID) {
+				errCh <- errors.New("Exists() returned true after Delete")
+				return
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent access test failed: %v", err)
+		}
 	}
 }

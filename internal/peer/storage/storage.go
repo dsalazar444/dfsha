@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -46,6 +47,7 @@ var (
 // Store es el almacenamiento local de un peer.
 type Store struct {
 	basePath string
+	mu       sync.RWMutex
 }
 
 // NewStore crea un Store sobre basePath. Crea el directorio base aquí
@@ -131,7 +133,11 @@ func (s *Store) Save(ownerUserID string, chunkID model.ChunkID, envelope []byte)
 		return err // ya viene formateado de chunkPath
 	}
 
-	dir := filepath.Dir(finalPath)
+	dir := filepath.Dir(finalPath) // obtiene directorio padre de final path
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// creamos dir con permisos, inicializando err, y luego miramos si no es vacio.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("%w: creating directory %q: %w", ErrServer, dir, err)
@@ -145,7 +151,7 @@ func (s *Store) Save(ownerUserID string, chunkID model.ChunkID, envelope []byte)
 	// Si algo falla antes del rename exitoso, se borra el temporal
 	// para no dejar basura acumulándose en disco. Si el rename sí
 	// tuvo éxito, tmpPath ya no existe y este Remove no hace nada.
-	defer os.Remove(tmpPath) // con defer "programamos" ejecución cuando se termine la función.
+	defer os.Remove(tmpPath)
 
 	if _, err := tmp.Write(envelope); err != nil {
 		tmp.Close()
@@ -176,6 +182,9 @@ func (s *Store) Load(ownerUserID string, chunkID model.ChunkID) ([]byte, error) 
 		return nil, err
 	}
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w: chunk %s not found: %w", ErrNotFound, chunkID, err)
@@ -193,6 +202,9 @@ func (s *Store) Delete(ownerUserID string, chunkID model.ChunkID) error {
 		return err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	err = os.Remove(path)
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -208,6 +220,9 @@ func (s *Store) Exists(ownerUserID string, chunkID model.ChunkID) bool {
 		return false
 	}
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	_, err = os.Stat(path)
 	return err == nil
 }
@@ -218,8 +233,11 @@ func (s *Store) Exists(ownerUserID string, chunkID model.ChunkID) bool {
 // Nota de portabilidad: syscall.Statfs es específico de Linux (y la
 // mayoría de Unix).
 func (s *Store) FreeSpace() (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var stat syscall.Statfs_t
-	// consultamos info de basePath y lo guardamos es stat
+	// consultamos info de basePath y lo guardamos en stat
 	if err := syscall.Statfs(s.basePath, &stat); err != nil {
 		return 0, fmt.Errorf("%w: consulting free space of %q: %w", ErrServer, s.basePath, err)
 	}
@@ -231,6 +249,9 @@ func (s *Store) FreeSpace() (int64, error) {
 // (ownerUserID/fileID/index). Se usa para armar el payload del
 // heartbeat periódico.
 func (s *Store) ListChunkIDs() ([]StoredChunk, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	var chunks []StoredChunk
 
 	err := filepath.WalkDir(s.basePath, func(path string, d fs.DirEntry, err error) error {
