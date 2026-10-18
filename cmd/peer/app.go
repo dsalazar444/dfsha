@@ -83,7 +83,7 @@ func (a *app) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	tlsClient, err := tlsconf.NewClient(a.cfg.TLSCA, httpTimeout) // trusts the DFSha CA for https superpeers and peers
+	tlsClient, err := tlsconf.NewClient(a.cfg.TLSCA, a.cfg.TLSCert, a.cfg.TLSKey, httpTimeout) // trusts the DFSha CA and shows our certificate to the peers that ask for it
 	if err != nil {
 		return fmt.Errorf("TLS: %w", err)
 	}
@@ -119,6 +119,11 @@ func (a *app) run(ctx context.Context) error {
 	httpServer := &http.Server{
 		Handler:           server.NewServer(store, superpeer, peerID, a.cfg.MaxChunkSizeMB).Routes(),
 		ReadHeaderTimeout: 10 * time.Second, // do not let a client hold a connection open without sending headers
+	}
+	if a.cfg.TLSCert != "" { // mutual TLS: only nodes with a certificate of our CA can reach the chunk endpoints
+		if err := tlsconf.RequireClientCert(httpServer, a.cfg.TLSCA); err != nil {
+			return fmt.Errorf("TLS: %w", err)
+		}
 	}
 	go func() {
 		if err := tlsconf.Serve(httpServer, listener, a.cfg.TLSCert, a.cfg.TLSKey, a.cfg.AllowInsecure); !errors.Is(err, http.ErrServerClosed) {

@@ -227,7 +227,7 @@ func TestDoOverTLSTrustsOnlyTheGivenCA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	trusting, err := tlsconf.NewClient(caFile, 2*time.Second)
+	trusting, err := tlsconf.NewClient(caFile, "", "", 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

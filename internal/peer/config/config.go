@@ -33,10 +33,10 @@ const (
 	defaultParallelism       = 4
 )
 
-// TODO(final): TLS es opcional mientras se desarrolla el proyecto. Al final hay que
-// cambiar defaultAllowInsecure a false (igual que en el superpeer), para que el peer
-// se niegue a iniciar sin TLS_CERT y TLS_KEY
-const defaultAllowInsecure = true
+// TLS es obligatorio por defecto: sin TLS_CERT y TLS_KEY el peer se niega a iniciar, y solo acepta
+// superpeers con URL https. Para desarrollo local sin certificados hay que pedirlo de forma explícita
+// con ALLOW_INSECURE=true (igual que en el superpeer)
+const defaultAllowInsecure = false
 
 // Config is the validated configuration of one peer process.
 type Config struct {
@@ -81,8 +81,10 @@ type Config struct {
 	TLSCert string
 	TLSKey  string
 
-	// TLSCA is the CA certificate (TLS_CA) used to trust the superpeers and the other
-	// peers when they are reached over https. Empty: the system's CAs.
+	// TLSCA is the CA certificate (TLS_CA). It is used to trust the superpeers and the
+	// other peers when they are reached over https, and, when the peer serves HTTPS, to
+	// check the certificate that every client must present (mutual TLS). Required with
+	// TLS_CERT.
 	TLSCA string
 
 	// AllowInsecure lets the peer serve plain HTTP when it has no certificate
@@ -121,26 +123,9 @@ func load(envFile string, lookupEnv func(string) (string, bool)) (Config, error)
 		TLSCA:         get("TLS_CA"),
 	}
 
-	// Checked here, and not when the server starts, so a typo fails before the
-	// login prompt and not after it.
-	if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
-		return Config{}, errors.New("TLS_CERT and TLS_KEY must be set together")
-	}
-	cfg.AllowInsecure = defaultAllowInsecure
-	if v := get("ALLOW_INSECURE"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("ALLOW_INSECURE must be true or false, got %q", v)
-		}
-		cfg.AllowInsecure = b
-	}
-	if cfg.TLSCert == "" && !cfg.AllowInsecure {
-		return Config{}, errors.New("TLS is required: set TLS_CERT and TLS_KEY (or ALLOW_INSECURE=true for local tests only)")
-	}
-
 	// Required settings first, with the variable name in the message.
 	if cfg.SuperpeerURLs == "" {
-		return Config{}, errors.New("SUPERPEER_URLS is required (comma-separated list, for example http://10.0.0.1:8080,http://10.0.0.2:8080)")
+		return Config{}, errors.New("SUPERPEER_URLS is required (comma-separated list, for example https://10.0.0.1:8080,https://10.0.0.2:8080)")
 	}
 	if err := checkURLList(cfg.SuperpeerURLs); err != nil {
 		return Config{}, fmt.Errorf("SUPERPEER_URLS: %w", err)
@@ -194,6 +179,29 @@ func load(envFile string, lookupEnv func(string) (string, bool)) (Config, error)
 			return Config{}, fmt.Errorf("PARALLELISM must be a positive number, got %q", v)
 		}
 		cfg.Parallelism = n
+	}
+
+	// TLS settings. Checked here, and not when the server starts, so a typo fails before the
+	// login prompt and not after it.
+	if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
+		return Config{}, errors.New("TLS_CERT and TLS_KEY must be set together")
+	}
+	if cfg.TLSCert != "" && cfg.TLSCA == "" {
+		return Config{}, errors.New("TLS_CA is required with TLS_CERT: the peer checks the certificate of every client that connects to it (mutual TLS)")
+	}
+	cfg.AllowInsecure = defaultAllowInsecure
+	if v := get("ALLOW_INSECURE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("ALLOW_INSECURE must be true or false, got %q", v)
+		}
+		cfg.AllowInsecure = b
+	}
+	if cfg.TLSCert == "" && !cfg.AllowInsecure {
+		return Config{}, errors.New("TLS is required: set TLS_CERT and TLS_KEY (or ALLOW_INSECURE=true for local tests only)")
+	}
+	if !cfg.AllowInsecure && strings.Contains(strings.ReplaceAll(cfg.SuperpeerURLs, " ", ""), "http://") {
+		return Config{}, errors.New("SUPERPEER_URLS must be https:// URLs while TLS is required (or ALLOW_INSECURE=true for local tests only)")
 	}
 
 	return cfg, nil

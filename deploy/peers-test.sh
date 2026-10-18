@@ -5,6 +5,7 @@
 #   2. peer1 sube un archivo y peer2 lo baja: el contenido es idéntico (los chunks viajan por HTTPS entre peers)
 #   3. cada chunk quedó en 2 peers (factor de replicación 2), repartidos entre los 3
 #   4. un peer no atiende HTTP plano
+#   5. mTLS: un cliente sin certificado no entra al puerto de datos del peer (los envíos entre peers sí funcionan: usan su certificado)
 #
 #   bash deploy/peers-test.sh            deja el clúster arriba al terminar (para mirar los logs)
 #   bash deploy/peers-test.sh --clean    lo apaga y borra todo al terminar
@@ -64,6 +65,13 @@ echo "=== 4) HTTP plano contra un peer"
 # wget -S imprime la respuesta del servidor; un servidor HTTPS contesta 400 a una petición sin TLS
 PLAIN=$(docker exec dfsha-peer2 sh -c 'wget -S -q -O /dev/null http://peer1:9000/chunks/x 2>&1' | grep -c "400")
 check "http plano a peer1 -> 400" "$([ "$PLAIN" -ge 1 ] && echo 400 || echo otro)" "400"
+
+echo "=== 5) mTLS: un cliente sin certificado no entra al puerto de datos del peer"
+# Control: wget sí sabe hablar TLS (el superpeer no pide certificado de cliente, así que responde)
+http_status_lines() { docker exec dfsha-peer2 sh -c "wget -S -q -O /dev/null --no-check-certificate $1 2>&1" | grep -c "HTTP/1"; }
+check "control: wget llega al superpeer por https y recibe respuesta" "$([ "$(http_status_lines https://sp1:8080/health)" -ge 1 ] && echo si || echo no)" "si"
+# El peer exige certificado de cliente: sin él falla el saludo TLS y no hay ninguna respuesta HTTP
+check "sin certificado de cliente el peer no responde nada HTTP" "$(http_status_lines https://peer1:9000/chunks/x)" "0"
 
 echo
 [ $FAILED = 0 ] && echo "RESULTADO: todo bien" || echo "RESULTADO: hubo fallas"

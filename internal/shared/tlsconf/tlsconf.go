@@ -1,10 +1,13 @@
 // Package tlsconf is the HTTPS setup shared by the superpeer, the peer and the CLI.
 // It has two parts, one for each side of a connection:
-//   - ListenAndServe: a server answers over HTTPS when it has a certificate
+//   - ListenAndServe / Serve: a server answers over HTTPS when it has a certificate
 //   - NewClient: a client trusts the servers whose certificate was signed by the DFSha CA
 //
-// The certificates come from deploy/certs/gen-certs.sh. Only one side checks the other (the client
-// checks the server); who is allowed to talk to the superpeer is a separate matter (tokens, API keys)
+// The certificates come from deploy/certs/gen-certs.sh. By default only one side checks the other (the client
+// checks the server); who is allowed to talk to the superpeer is a separate matter (tokens).
+// RequireClientCert turns a server into a mutual-TLS one: it also demands a certificate from the client and
+// checks it against the CA. The peers use it on their data port, so only nodes of the system can send, fetch or
+// delete chunks. A client presents its own certificate when NewClient gets one
 
 package tlsconf
 
@@ -73,12 +76,53 @@ func mode(certFile, keyFile string, allowPlain bool) (useTLS bool, err error) {
 // NewClient returns an http.Client that trusts the servers whose certificate was signed by the CA in caFile
 // Only that CA is trusted (not the ones of the system): in this project every server is signed by ours
 // With an empty caFile it is a plain client, which works for http:// addresses (development)
+// certFile and keyFile are the client's own certificate and key, which a server with RequireClientCert asks for
+// (empty: none is presented). A server that does not ask for one never sees it
 // timeout is the total time one request may take
-func NewClient(caFile string, timeout time.Duration) (*http.Client, error) {
-	if caFile == "" {
+func NewClient(caFile, certFile, keyFile string, timeout time.Duration) (*http.Client, error) {
+	if (certFile == "") != (keyFile == "") {
+		return nil, errors.New("a client certificate needs both the certificate and the key")
+	}
+	if caFile == "" && certFile == "" {
 		return &http.Client{Timeout: timeout}, nil
 	}
 
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if caFile != "" {
+		pool, err := loadPool(caFile)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.RootCAs = pool
+	}
+	if certFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading the client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
+	// Clone keeps the defaults of the standard transport (connection reuse, proxy, timeouts)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
+}
+
+// RequireClientCert makes srv demand a certificate from every client, signed by the CA in caFile
+// (mutual TLS). A client without one, or with one from another CA, fails in the handshake and never
+// reaches the handlers. It only has effect when the server serves HTTPS (see Serve)
+func RequireClientCert(srv *http.Server, caFile string) error {
+	pool, err := loadPool(caFile)
+	if err != nil {
+		return err
+	}
+	srv.TLSConfig = &tls.Config{ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12}
+	return nil
+}
+
+// loadPool reads a PEM file with the CA certificate
+func loadPool(caFile string) (*x509.CertPool, error) {
 	caPEM, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading CA certificate: %w", err)
@@ -87,9 +131,5 @@ func NewClient(caFile string, timeout time.Duration) (*http.Client, error) {
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, fmt.Errorf("%q has no valid certificate", caFile)
 	}
-
-	// Clone keeps the defaults of the standard transport (connection reuse, proxy, timeouts)
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
-	return &http.Client{Timeout: timeout, Transport: transport}, nil
+	return pool, nil
 }

@@ -22,9 +22,11 @@ func writeEnvFile(t *testing.T, content string) string {
 	return p
 }
 
+// ALLOW_INSECURE=true: these tests use http:// superpeers and no certificates
 const minimal = `SUPERPEER_URLS=http://a:8080,http://b:8080
 PEER_ADDRESS=10.0.0.5
 PEER_PORT=9000
+ALLOW_INSECURE=true
 `
 
 func TestLoadMinimalUsesDefaults(t *testing.T) {
@@ -65,7 +67,7 @@ DFSHA_USERNAME=ana
 
 func TestLoadWithoutFileUsesEnvironment(t *testing.T) {
 	cfg, err := load(filepath.Join(t.TempDir(), "missing.env"), env(map[string]string{
-		"SUPERPEER_URLS": "http://x:1", "PEER_ADDRESS": "h", "PEER_PORT": "1",
+		"SUPERPEER_URLS": "http://x:1", "PEER_ADDRESS": "h", "PEER_PORT": "1", "ALLOW_INSECURE": "true",
 	}))
 	if err != nil || cfg.PeerPort != "1" {
 		t.Fatalf("%+v, %v", cfg, err)
@@ -126,25 +128,42 @@ F=
 }
 
 func TestLoadTLS(t *testing.T) {
-	file := writeEnvFile(t, minimal)
+	with := func(base map[string]string, extra map[string]string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	file := writeEnvFile(t, "SUPERPEER_URLS=https://a:8080\nPEER_ADDRESS=10.0.0.5\nPEER_PORT=9000\n") // no ALLOW_INSECURE
 
-	// Without TLS variables: plain HTTP is allowed (default).
-	cfg, err := load(file, env(nil))
+	// TLS is required by default: without certificates the peer does not start.
+	if _, err := load(file, env(nil)); err == nil || !strings.Contains(err.Error(), "TLS is required") {
+		t.Errorf("default without certificates: err = %v", err)
+	}
+
+	// Plain HTTP only when asked for explicitly.
+	cfg, err := load(file, env(map[string]string{"ALLOW_INSECURE": "true"}))
 	if err != nil || !cfg.AllowInsecure || cfg.TLSCert != "" {
-		t.Fatalf("default: %+v, %v", cfg, err)
+		t.Errorf("ALLOW_INSECURE=true: %+v, %v", cfg, err)
 	}
 
 	// Certificate, key and CA are read.
-	cfg, err = load(file, env(map[string]string{"TLS_CERT": "c.crt", "TLS_KEY": "c.key", "TLS_CA": "ca.crt", "ALLOW_INSECURE": "false"}))
+	cfg, err = load(file, env(map[string]string{"TLS_CERT": "c.crt", "TLS_KEY": "c.key", "TLS_CA": "ca.crt"}))
 	if err != nil || cfg.TLSCert != "c.crt" || cfg.TLSKey != "c.key" || cfg.TLSCA != "ca.crt" || cfg.AllowInsecure {
 		t.Errorf("with TLS: %+v, %v", cfg, err)
 	}
 
+	tls := map[string]string{"TLS_CERT": "c.crt", "TLS_KEY": "c.key", "TLS_CA": "ca.crt"}
 	for name, vars := range map[string]map[string]string{
-		"only the certificate": {"TLS_CERT": "c.crt"},
-		"only the key":         {"TLS_KEY": "c.key"},
-		"insecure forbidden":   {"ALLOW_INSECURE": "false"},
-		"bad boolean":          {"ALLOW_INSECURE": "maybe"},
+		"only the certificate":      {"TLS_CERT": "c.crt"},
+		"only the key":              {"TLS_KEY": "c.key"},
+		"certificate without CA":    {"TLS_CERT": "c.crt", "TLS_KEY": "c.key"},
+		"bad boolean":               {"ALLOW_INSECURE": "maybe"},
+		"http superpeer, TLS asked": with(tls, map[string]string{"SUPERPEER_URLS": "https://a:8080, http://b:8080"}),
 	} {
 		if _, err := load(file, env(vars)); err == nil {
 			t.Errorf("%s: no error", name)

@@ -460,3 +460,67 @@ func TestInputIsNotReadAheadWhileACommandRuns(t *testing.T) {
 		t.Errorf("input was read %d times while login ran, want 1 (no read-ahead)", readsDuringLogin)
 	}
 }
+
+func TestLockAndUnlock(t *testing.T) {
+	sp := &fakeSuperpeer{}
+	out := run(t, sp, &fakeTransfer{}, nil, "lock a.txt\nlock a.txt\nunlock a.txt\nunlock a.txt\nunlock never\nhelp\nexit\n")
+
+	// Only the first lock and the first unlock reach the superpeer.
+	if got := strings.Join(sp.calls, ","); got != "lock /a.txt,unlock /a.txt lock-1" {
+		t.Errorf("superpeer calls = %s", got)
+	}
+	for _, want := range []string{
+		"locked /a.txt", "/a.txt is already locked by this session",
+		"unlocked /a.txt", "/a.txt is not locked by this session", "/never is not locked by this session",
+		"lock <path>", "unlock <path>", // help lists both commands
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// A lock still held when the session ends is released, and mdf reuses a lock taken with lock.
+func TestLockIsReleasedOnExitAndMdfReusesIt(t *testing.T) {
+	defer func(old func(string) error) { editor = old }(editor)
+	editor = func(file string) error { return nil } // no changes
+
+	sp := &fakeSuperpeer{}
+	tr := &fakeTransfer{files: map[string][]byte{"/a.txt": []byte("x")}}
+	run(t, sp, tr, nil, "lock a.txt\nmdf a.txt\nexit\n")
+
+	if got := strings.Join(sp.calls, ","); got != "lock /a.txt,unlock /a.txt lock-1" {
+		t.Errorf("superpeer calls = %s (mdf must not lock again, and exit must release)", got)
+	}
+}
+
+func TestMdf(t *testing.T) {
+	fakeEditor := func(content string) {
+		editor = func(file string) error { return os.WriteFile(file, []byte(content), 0o600) }
+	}
+	defer func(old func(string) error) { editor = old }(editor)
+
+	fakeEditor("new")
+	sp, tr := &fakeSuperpeer{}, &fakeTransfer{files: map[string][]byte{"/a.txt": []byte("old")}}
+	out := run(t, sp, tr, nil, "mdf a.txt\n")
+	if got := strings.Join(sp.calls, ","); got != "lock /a.txt,rm /a.txt,unlock /a.txt lock-1" {
+		t.Errorf("superpeer calls = %s", got)
+	}
+	if got := strings.Join(tr.calls, ","); got != "get /a.txt,put /a.txt" {
+		t.Errorf("transfer calls = %s", got)
+	}
+	if string(tr.files["/a.txt"]) != "new" || !strings.Contains(out, "modified /a.txt") {
+		t.Errorf("not uploaded:\n%s", out)
+	}
+
+	// Same content: nothing is deleted or uploaded, but the lock is released.
+	fakeEditor("old")
+	sp, tr = &fakeSuperpeer{}, &fakeTransfer{files: map[string][]byte{"/a.txt": []byte("old")}}
+	out = run(t, sp, tr, nil, "mdf a.txt\n")
+	if got := strings.Join(sp.calls, ","); got != "lock /a.txt,unlock /a.txt lock-1" {
+		t.Errorf("superpeer calls = %s", got)
+	}
+	if !strings.Contains(out, "no changes") {
+		t.Errorf("missing 'no changes':\n%s", out)
+	}
+}
