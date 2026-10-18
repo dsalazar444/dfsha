@@ -186,7 +186,7 @@ func TestDoJSONBadResponseJSON(t *testing.T) {
 }
 
 func TestAsSuperpeerError(t *testing.T) {
-	down := asSuperpeerError(&StatusError{Code: 500, Message: "boom"})
+	down := AsSuperpeerError(&StatusError{Code: 500, Message: "boom"})
 	if !errors.Is(down, ErrSuperpeerUnavailable) {
 		t.Error("500 was not tagged as superpeer unavailable")
 	}
@@ -195,15 +195,15 @@ func TestAsSuperpeerError(t *testing.T) {
 		t.Error("original *StatusError was lost")
 	}
 
-	if !errors.Is(asSuperpeerError(ErrUnreachable), ErrSuperpeerUnavailable) {
+	if !errors.Is(AsSuperpeerError(ErrUnreachable), ErrSuperpeerUnavailable) {
 		t.Error("transport failure was not tagged")
 	}
 
-	refused := asSuperpeerError(&StatusError{Code: 401, Message: "expired"})
+	refused := AsSuperpeerError(&StatusError{Code: 401, Message: "expired"})
 	if errors.Is(refused, ErrSuperpeerUnavailable) || !errors.Is(refused, ErrUnauthorized) {
 		t.Error("a 401 must stay a 401 and not count as down")
 	}
-	if asSuperpeerError(nil) != nil {
+	if AsSuperpeerError(nil) != nil {
 		t.Error("nil must stay nil")
 	}
 }

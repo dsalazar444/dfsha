@@ -119,7 +119,8 @@ paths:
                 peer_id:
                   type: string
                 available_space:
-                  type: string
+                  type: integer
+                  format: int64
                   description: Free space reported by the peer (for example, available bytes)
                 chunks:
                   type: array

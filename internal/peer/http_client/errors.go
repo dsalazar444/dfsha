@@ -83,7 +83,7 @@ func IsUnavailable(err error) bool {
 // asSuperpeerError tags errors that mean "superpeer down" with
 // ErrSuperpeerUnavailable, keeping the original error wrapped too. Every
 // SuperpeerClient method passes its error through here.
-func asSuperpeerError(err error) error {
+func AsSuperpeerError(err error) error {
 	if err != nil && IsUnavailable(err) {
 		return fmt.Errorf("%w: %w", ErrSuperpeerUnavailable, err)
 	}

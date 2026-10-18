@@ -283,8 +283,8 @@ func TestDeleteTaskRemovesLocalChunkOnly(t *testing.T) {
 	s := NewSender("peer-1", store, sp, peers, time.Hour, newFakeFailover())
 
 	err := s.runTask(context.Background(), model.ReplicationTask{
-		Action:     model.ReplicationActionDelete,
-		ChunkID:    "f_0",
+		Action:      model.ReplicationActionDelete,
+		ChunkID:     "f_0",
 		OwnerUserID: "u1",
 	})
 	if err != nil {
@@ -575,5 +575,33 @@ func TestCancelledContextIsNotAFailure(t *testing.T) {
 	}
 	if len(fo.rotated) != 0 || s.consecutiveFailures != 0 {
 		t.Error("failures during shutdown were counted")
+	}
+}
+
+func Test421CountsAsUnavailableAndSwitches(t *testing.T) {
+	root := t.TempDir()
+	store, err := storage.NewStore(root)
+	if err != nil {
+		t.Fatalf("storage.NewStore() error = %v", err)
+	}
+
+	sp := &fakeSuperpeer{errFn: func(call int) error {
+		return fmt.Errorf("%w: %w", http_client.ErrSuperpeerUnavailable, &http_client.StatusError{Code: 421, Message: "standby not ready"})
+	}}
+	fo := newFakeFailover()
+	s := NewSender("peer-1", store, sp, &fakePeers{}, time.Hour, fo)
+
+	for i := 0; i < failuresBeforeSwitch; i++ {
+		s.beat(context.Background())
+	}
+
+	if len(fo.rotated) != 1 || fo.rotated[0] != "http://sp-a" {
+		t.Fatalf("rotations = %v, want [http://sp-a]", fo.rotated)
+	}
+	if fo.Active() != "http://sp-b" {
+		t.Errorf("active = %s, want http://sp-b", fo.Active())
+	}
+	if len(sp.payloads) != failuresBeforeSwitch+1 {
+		t.Errorf("sent %d heartbeats, want %d (3 failures + one probe)", len(sp.payloads), failuresBeforeSwitch+1)
 	}
 }
