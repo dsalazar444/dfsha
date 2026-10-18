@@ -98,6 +98,10 @@ type Sender struct {
 	// it, and beat only runs on the goroutine of Run.
 	consecutiveFailures int
 
+	// reregister vuelve a registrar este peer en el superpeer activo cuando responde 404.
+	// Devuelve el peer_id que le asignó. Lo define quien crea el Sender (SetReregister)
+	reregister func(ctx context.Context) (string, error)
+
 	// slots is a counting semaphore: one token per running task.
 	slots chan struct{} // es un semaforo, que tendrá n (4) elementos, donde cada uno representa permiso de ejecutar tarea.
 
@@ -134,6 +138,10 @@ func NewSender(peerID string, store *storage.Store, superpeer SuperpeerAPI, peer
 		inFlight:  make(map[model.ChunkID]struct{}),
 	}
 }
+
+// SetReregister define cómo registrarse de nuevo cuando el superpeer responde 404 ("no te conozco").
+// Sin esto, un 404 solo se anota en el log
+func (s *Sender) SetReregister(fn func(ctx context.Context) (string, error)) { s.reregister = fn }
 
 // Run sends one heartbeat right away (so the superpeer learns about this
 // peer without waiting a full interval) and then one per interval, until
@@ -222,6 +230,23 @@ func (s *Sender) handleHeartbeatError(ctx context.Context, used string, err erro
 		return
 	}
 
+	// 404: el superpeer está vivo pero no conoce este peer (por ejemplo un respaldo que nunca vio
+	// el registro). Se registra de nuevo y el siguiente heartbeat ya sale normal
+	if errors.Is(err, http_client.ErrNotFound) && s.reregister != nil {
+		s.consecutiveFailures = 0
+		id, rerr := s.reregister(ctx)
+		switch {
+		case rerr != nil:
+			log.Printf("registering again at %s failed: %v", used, rerr)
+		case id != s.peerID:
+			// Los heartbeats y los acks siguen usando el ID viejo, así que esto no se arregla solo
+			log.Printf("registered again at %s but it gave peer ID %s instead of %s: restart the peer", used, id, s.peerID)
+		default:
+			log.Printf("registered again at %s", used)
+		}
+		return
+	}
+
 	if !errors.Is(err, http_client.ErrSuperpeerUnavailable) {
 		// It answered (400, 401, ...). Alive, but unhappy with us:
 		// log it and reset the counter, do not switch.
@@ -306,12 +331,13 @@ func (s *Sender) startTask(ctx context.Context, task model.ReplicationTask) {
 //
 // Like receiveChunk, it never decrypts anything: this peer has no keys.
 func (s *Sender) runTask(ctx context.Context, task model.ReplicationTask) error {
-	// DELETE tasks only remove the local chunk and then acknowledge it.
+	// Una tarea DELETE solo borra el chunk local. No manda put/ack: el ack significa "tengo este chunk"
+	// y el superpeer ya no lo conoce. Basta con que el chunk deje de salir en el siguiente heartbeat
 	if task.Action == model.ReplicationActionDelete {
 		if err := s.store.Delete(task.OwnerUserID, task.ChunkID); err != nil {
 			return fmt.Errorf("deleting chunk: %w", err)
 		}
-		return s.ack(task.ChunkID)
+		return nil
 	}
 
 	// We may already hold the chunk if an earlier attempt saved it but

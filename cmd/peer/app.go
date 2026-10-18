@@ -123,6 +123,10 @@ func (a *app) run(ctx context.Context) error {
 
 	// realizamos heartbeat
 	sender := heartbeat.NewSender(peerID, store, superpeer, peers, a.cfg.HeartbeatInterval, pool)
+	// Si el superpeer responde 404 ("no te conozco"), el peer se registra de nuevo en él
+	sender.SetReregister(func(ctx context.Context) (string, error) {
+		return superpeer.RegisterPeer(ctx, a.cfg.PeerAddress, a.cfg.PeerPort)
+	})
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)

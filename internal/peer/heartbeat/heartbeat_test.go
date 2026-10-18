@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"testing"
@@ -296,8 +297,51 @@ func TestDeleteTaskRemovesLocalChunkOnly(t *testing.T) {
 	if peers.callCount() != 0 {
 		t.Errorf("delete task contacted %d peers, want 0", peers.callCount())
 	}
-	if sp.ackCount() != 1 {
-		t.Errorf("delete task sent %d acks, want 1", sp.ackCount())
+	// Un DELETE no manda ack: el ack significa "tengo este chunk"
+	if sp.ackCount() != 0 {
+		t.Errorf("delete task sent %d acks, want 0", sp.ackCount())
+	}
+}
+
+func TestHeartbeatNotFoundRegistersAgain(t *testing.T) {
+	// El primer heartbeat recibe 404 ("no te conozco"); los siguientes responden bien
+	sp := &fakeSuperpeer{errFn: func(call int) error {
+		if call == 0 {
+			return &http_client.StatusError{Code: http.StatusNotFound, Message: "peer_id is not registered"}
+		}
+		return nil
+	}}
+	failover := newFakeFailover()
+	s := NewSender("peer-1", newTestStore(t), sp, &fakePeers{}, time.Hour, failover)
+
+	registered := 0
+	s.SetReregister(func(context.Context) (string, error) {
+		registered++
+		return "peer-1", nil
+	})
+
+	s.beat(context.Background())
+	if registered != 1 {
+		t.Fatalf("registered %d times after a 404, want 1", registered)
+	}
+	if len(failover.rotated) != 0 {
+		t.Errorf("a 404 changed the superpeer (%v): it is alive, only the registration is missing", failover.rotated)
+	}
+
+	s.beat(context.Background())
+	if registered != 1 {
+		t.Errorf("registered %d times, want 1: the second heartbeat worked", registered)
+	}
+}
+
+func TestNotFoundWithoutReregisterOnlyLogs(t *testing.T) {
+	sp := &fakeSuperpeer{heartbeatE: &http_client.StatusError{Code: http.StatusNotFound}}
+	failover := newFakeFailover()
+	s := NewSender("peer-1", newTestStore(t), sp, &fakePeers{}, time.Hour, failover)
+
+	s.beat(context.Background()) // no hay SetReregister: no debe fallar ni cambiar de superpeer
+	if len(failover.rotated) != 0 {
+		t.Errorf("rotated %v, want no change", failover.rotated)
 	}
 }
 
