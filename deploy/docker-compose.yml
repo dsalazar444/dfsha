@@ -1,4 +1,4 @@
-# Clúster local de DFSha: dos superpeers (uno líder y uno en standby) que comparten una carpeta, con TLS
+# Clúster local de DFSha: dos superpeers (uno líder y uno en standby) que comparten una carpeta, y tres peers, todo con TLS
 #
 # El volumen dfsha-state hace de NFS: los dos superpeers lo montan en /data (STATE_DIR) y por ahí
 # se pasan el estado (state.json) y el líder (leader.json). En AWS esa carpeta será un EFS
@@ -9,6 +9,8 @@
 #   docker compose -f deploy/docker-compose.yml up -d --build    # levantar
 #   docker compose -f deploy/docker-compose.yml kill sp1          # simular que el líder se cae
 #   docker compose -f deploy/docker-compose.yml down -v           # borrar todo, incluido el estado
+#
+# Pruebas automáticas:  bash deploy/failover-test.sh --clean   (caída del líder)   |   bash deploy/peers-test.sh --clean   (subir y bajar entre peers)
 #
 # sp1 -> https://localhost:8081      sp2 -> https://localhost:8082
 # Para llamarlos hay que confiar en la CA del proyecto:  curl --cacert deploy/certs/out/ca.crt https://localhost:8081/health
@@ -45,6 +47,40 @@ x-superpeer: &superpeer
     timeout: 3s
     retries: 3
 
+# ---- Configuración común de los peers (misma imagen para todos, CMD=peer) ----
+# El peer pide la contraseña por la entrada estándar: aquí se le da con DFSHA_PASSWORD y luego se queda
+# leyendo comandos del archivo /tmp/in, así los scripts de prueba le mandan comandos con:
+#   docker exec dfsha-peer1 sh -c 'echo "put /tmp/f.bin /f.bin" >> /tmp/in'     (el resultado sale en: docker logs dfsha-peer1)
+# La contraseña en el compose es solo para desarrollo local. En AWS se escribirá a mano
+x-peer-env: &peer-env
+  SUPERPEER_URLS: https://sp1:8080,https://sp2:8080
+  PEER_PORT: "9000"
+  STORAGE_PATH: /data/chunks
+  DFSHA_USERNAME: alice
+  DFSHA_PASSWORD: ${DFSHA_PASSWORD:-alice1234}
+  HEARTBEAT_INTERVAL: 5s
+  CHUNK_SIZE: "1048576" # 1 MiB por chunk: un archivo de unos MB ya se parte en varios chunks
+  TLS_CERT: /certs/server.crt
+  TLS_KEY: /certs/server.key
+  TLS_CA: /certs/ca.crt
+  ALLOW_INSECURE: "false"
+
+x-peer: &peer
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    args:
+      CMD: peer
+  image: dfsha-peer
+  stop_grace_period: 2s
+  entrypoint:
+    - sh
+    - -c
+    - touch /tmp/in; (echo "$$DFSHA_PASSWORD"; tail -f -n0 /tmp/in) | /app
+  depends_on:
+    sp1:
+      condition: service_healthy
+
 services:
   sp1:
     <<: *superpeer
@@ -80,27 +116,48 @@ services:
       sp1:
         condition: service_healthy
 
-  # Cuando exista cmd/peer, aquí van los peers (misma imagen con CMD=peer, un volumen de datos cada uno).
-  # Cada peer monta su certificado y su clave, y además ca.crt para confiar en los superpeers y en otros peers.
-  # Los nombres de las variables dependen del main del peer (pendiente de Daniela):
-  #
-  # peer1:
-  #   build:
-  #     context: ..
-  #     dockerfile: deploy/Dockerfile
-  #     args: { CMD: peer }
-  #   hostname: peer1
-  #   environment:
-  #     SUPERPEER_URLS: https://sp1:8080,https://sp2:8080
-  #     TLS_CERT: /certs/server.crt
-  #     TLS_KEY: /certs/server.key
-  #     TLS_CA: /certs/ca.crt
-  #     ALLOW_INSECURE: "false"
-  #   volumes:
-  #     - peer1-data:/data
-  #     - ./certs/out/peer1.crt:/certs/server.crt:ro
-  #     - ./certs/out/peer1.key:/certs/server.key:ro
-  #     - ./certs/out/ca.crt:/certs/ca.crt:ro
+  # Cada peer monta solo su certificado y su clave (nunca la carpeta entera) y ca.crt para confiar en los demás
+  peer1:
+    <<: *peer
+    container_name: dfsha-peer1
+    hostname: peer1
+    environment:
+      <<: *peer-env
+      PEER_ADDRESS: peer1 # debe estar en el certificado del peer: es el nombre con el que los demás lo llaman
+    volumes:
+      - peer1-data:/data
+      - ./certs/out/peer1.crt:/certs/server.crt:ro
+      - ./certs/out/peer1.key:/certs/server.key:ro
+      - ./certs/out/ca.crt:/certs/ca.crt:ro
+
+  peer2:
+    <<: *peer
+    container_name: dfsha-peer2
+    hostname: peer2
+    environment:
+      <<: *peer-env
+      PEER_ADDRESS: peer2 # debe estar en el certificado del peer: es el nombre con el que los demás lo llaman
+    volumes:
+      - peer2-data:/data
+      - ./certs/out/peer2.crt:/certs/server.crt:ro
+      - ./certs/out/peer2.key:/certs/server.key:ro
+      - ./certs/out/ca.crt:/certs/ca.crt:ro
+
+  peer3:
+    <<: *peer
+    container_name: dfsha-peer3
+    hostname: peer3
+    environment:
+      <<: *peer-env
+      PEER_ADDRESS: peer3 # debe estar en el certificado del peer: es el nombre con el que los demás lo llaman
+    volumes:
+      - peer3-data:/data
+      - ./certs/out/peer3.crt:/certs/server.crt:ro
+      - ./certs/out/peer3.key:/certs/server.key:ro
+      - ./certs/out/ca.crt:/certs/ca.crt:ro
 
 volumes:
   dfsha-state:
+  peer1-data:
+  peer2-data:
+  peer3-data:
