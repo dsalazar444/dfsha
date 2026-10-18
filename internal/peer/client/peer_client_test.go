@@ -14,7 +14,7 @@ import (
 	"dfsha/internal/shared/model"
 )
 
-func newTestClient() *http_client.HTTPClient { return http_client.NewHTTPClient(2 * time.Second) }
+func newTestClient() *http_client.HTTPClient { return http_client.NewHTTPClient(2*time.Second, 64) }
 
 // NOTA: srv es peer que es contactado, client es el que contacta
 func TestFetchChunk(t *testing.T) {

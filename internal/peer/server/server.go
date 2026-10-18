@@ -11,13 +11,14 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 
 	"dfsha/internal/peer/hash"
 	"dfsha/internal/peer/storage"
 	"dfsha/internal/shared/model"
 )
+
+const defaultMaxChunkSizeMB = 64
 
 // TODO: Si interface crece, sacarla a archivo aparte
 // superpeerClient define la mínima operación que el peer necesita del
@@ -34,11 +35,16 @@ type Server struct {
 	// obtuvo en /peers/register). Se necesita para el put/ack: el
 	// superpeer debe saber QUIÉN confirma haber recibido el chunk.
 	peerID string
+
+	maxChunkSizeMB int
 }
 
 // NewServer crea un Server con sus dependencias ya resueltas.
-func NewServer(store *storage.Store, superpeerClient superpeerClient, peerID string) *Server {
-	return &Server{store: store, superpeerClient: superpeerClient, peerID: peerID}
+func NewServer(store *storage.Store, superpeerClient superpeerClient, peerID string, maxChunkSizeMB int) *Server {
+	if maxChunkSizeMB <= 0 {
+		maxChunkSizeMB = defaultMaxChunkSizeMB
+	}
+	return &Server{store: store, superpeerClient: superpeerClient, peerID: peerID, maxChunkSizeMB: maxChunkSizeMB}
 }
 
 // Routes registra los handlers de este paquete en un mux. Se separa
@@ -83,16 +89,7 @@ func (s *Server) receiveChunk(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	maxChunkSizeMB := int64(64)
-
-	// Es parametrizable en .env
-	if v := os.Getenv("MAX_CHUNK_SIZE_MB"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			maxChunkSizeMB = n
-		}
-	}
-
-	maxChunkSize := maxChunkSizeMB << 20
+	maxChunkSize := int64(s.maxChunkSizeMB) << 20
 	// ponemos maximo recibido para proteger contra ataques DoS
 	r.Body = http.MaxBytesReader(w, r.Body, maxChunkSize+(1<<20)) // ponemos 1 MiB de más para el tag y el nonce
 

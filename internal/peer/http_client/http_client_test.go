@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func newTestClient() *HTTPClient { return NewHTTPClient(2 * time.Second) }
+func newTestClient() *HTTPClient { return NewHTTPClient(2*time.Second, 64) }
 
 // Construye una petición GET y la ejecuta usando c.Do(req).
 func get(t *testing.T, c *HTTPClient, url string) ([]byte, error) {

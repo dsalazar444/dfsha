@@ -8,30 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // NOTA: Do se encarga de la comunicación HTTP y DoJSON de convertir datos entre Go y JSON.
 
-func getMaxChunkSize() int64 {
-	// maxChunkSize caps how much of a successful response is read into
-	// memory. A chunk envelope is a few MiB; this leaves a wide margin and
-	// still stops a misbehaving server from filling this peer's RAM.
-	// cantidad de datos que el cliente lee del cuerpo de una respuesta HTTP exitosa
-	maxChunkSizeMB := int64(64)
-
-	if v := os.Getenv("MAX_CHUNK_SIZE_MB"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			maxChunkSizeMB = n
-		}
-	}
-	maxChunkSize := maxChunkSizeMB << 20
-
-	return maxChunkSize
-}
+const defaultMaxChunkSizeMB int64 = 64
 
 const (
 	// maxErrorBody caps how much of an error response is kept as message.
@@ -54,10 +37,13 @@ type HTTPClient struct {
 // NewHTTPClient builds an HTTPClient. timeout is the total budget of one
 // request, including reading the body; callers can set a tighter one per
 // request with the context.
-func NewHTTPClient(timeout time.Duration) *HTTPClient { // timeout es tiempo máximo que puede consumir una petición ejecutada por el cliente (cubre la petición completa, incluida la lectura del cuerpo de la respuesta.)
+func NewHTTPClient(timeout time.Duration, maxChunkSizeMB int) *HTTPClient { // timeout es tiempo máximo que puede consumir una petición ejecutada por el cliente (cubre la petición completa, incluida la lectura del cuerpo de la respuesta.)
+	if maxChunkSizeMB <= 0 {
+		maxChunkSizeMB = int(defaultMaxChunkSizeMB)
+	}
 	return &HTTPClient{
 		client:  &http.Client{Timeout: timeout},
-		maxBody: getMaxChunkSize() + (1 << 20),
+		maxBody: int64(maxChunkSizeMB)<<20 + (1 << 20),
 	}
 }
 

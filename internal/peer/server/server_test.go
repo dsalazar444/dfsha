@@ -34,6 +34,7 @@ func newTestServer(t *testing.T) *Server {
 		store:           store,
 		superpeerClient: &fakeSuperpeerClient{},
 		peerID:          "peer-test",
+		maxChunkSizeMB:  64,
 	}
 }
 
