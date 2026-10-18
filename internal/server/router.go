@@ -38,10 +38,18 @@ type fsHandler interface {
 type fileHandler interface {
 	PutInit(w http.ResponseWriter, r *http.Request)
 	PutAck(w http.ResponseWriter, r *http.Request)
+	Get(w http.ResponseWriter, r *http.Request)
+	Delete(w http.ResponseWriter, r *http.Request)
+}
+
+// lockHandler is the subset of locks.Handler needed by the router
+type lockHandler interface {
+	Lock(w http.ResponseWriter, r *http.Request)
+	Unlock(w http.ResponseWriter, r *http.Request)
 }
 
 // NewRouter sets up the Chi router and routes
-func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler, fsHandler fsHandler, fileHandler fileHandler) http.Handler {
+func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandler, peerHandler peerHandler, fsHandler fsHandler, fileHandler fileHandler, lockHandler lockHandler) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware 
@@ -78,12 +86,13 @@ func NewRouter(cfg *config.Config, tokens tokenValidator, authHandler loginHandl
 		protected.Post("/files/put/ack", fileHandler.PutAck)
 
 		// Phase 5: file download and deletion
-		protected.Get("/files/get/{path}", notImplemented("GET /files/get/{path}"))
-		protected.Delete("/files/{path}", notImplemented("DELETE /files/{path}"))
+		// "*" captures paths with slashes (docs/thesis/chapter1.pdf)
+		protected.Get("/files/get/*", fileHandler.Get)
+		protected.Delete("/files/*", fileHandler.Delete)
 
 		// Phase 6: locking
-		protected.Post("/files/lock/{path}", notImplemented("POST /files/lock/{path}"))
-		protected.Post("/files/unlock/{path}", notImplemented("POST /files/unlock/{path}"))
+		protected.Post("/files/lock/*", lockHandler.Lock)
+		protected.Post("/files/unlock/*", lockHandler.Unlock)
 	})
 
 	return r

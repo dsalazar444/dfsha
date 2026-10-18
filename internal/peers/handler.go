@@ -50,14 +50,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // Heartbeat handles POST /peers/heartbeat
 //
 // Contract:
-//	Request:  { "peer_id": string, "available_space": string, "chunks": [string] }
+//	Request:  { "peer_id": string, "available_space": int64 (bytes), "chunks": [string] }
 //	Response: 200 (empty body or success object)
 //	          { "error": string } 400 | 404 | 500
 
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PeerID         string   `json:"peer_id"`
-		AvailableSpace string   `json:"available_space"`
+		AvailableSpace *int64   `json:"available_space"` // pointer to tell "missing" apart from 0 bytes free
 		Chunks         []string `json:"chunks"`
 	}
 
@@ -66,7 +66,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.PeerID == "" || body.AvailableSpace == "" {
+	if body.PeerID == "" || body.AvailableSpace == nil || *body.AvailableSpace < 0 {
 		writeError(w, http.StatusBadRequest, "peer_id and available_space are required")
 		return
 	}
@@ -76,7 +76,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		body.Chunks = []string{}
 	}
 
-	err := h.service.Heartbeat(body.PeerID, body.AvailableSpace, body.Chunks)
+	tasks, err := h.service.Heartbeat(body.PeerID, *body.AvailableSpace, body.Chunks)
 	if err != nil {
 		if errors.Is(err, ErrPeerNotFound) {
 			writeError(w, http.StatusNotFound, "peer not registered")
@@ -86,7 +86,15 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if tasks == nil {
+		tasks = []ReplicationTask{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"tasks":  tasks,
+	})
 }
 
 // writeError writes {"error": msg} with the given HTTP status code.

@@ -5,14 +5,21 @@ import (
 	"dfsha/internal/store"
 )
 
+// FileDeleter deletes the stored data (chunks in the peers) of files that were removed from the tree
+// Implemented by files.Service, defined here so fs does not depend on that package
+type FileDeleter interface {
+	DeleteFiles(userID string, fileIDs []string)
+}
+
 // Service manages filesystem logic
 type Service struct {
 	store *store.FsStore
+	files FileDeleter
 }
 
 // NewService creates a new fs Service
-func NewService(store *store.FsStore) *Service {
-	return &Service{store: store}
+func NewService(store *store.FsStore, files FileDeleter) *Service {
+	return &Service{store: store, files: files}
 }
 
 // Mkdir creates a directory in the user's isolated namespace
@@ -21,8 +28,15 @@ func (s *Service) Mkdir(userID, path string) error {
 }
 
 // Rmdir removes a directory in the user's isolated namespace
+// The files inside are also deleted from the peers, so no orphan chunks are left behind
 func (s *Service) Rmdir(userID, path string) error {
-	return s.store.Rmdir(userID, path)
+	fileIDs, err := s.store.Rmdir(userID, path)
+	if err != nil {
+		return err
+	}
+
+	s.files.DeleteFiles(userID, fileIDs)
+	return nil
 }
 
 // FsEntry represents a single file or directory for listing
