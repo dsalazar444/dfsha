@@ -1,4 +1,4 @@
-package peer
+package main
 
 // Command peer is a DFSha peer: it stores chunks for other peers, serves
 // them on request, reports to the superpeer, and gives its user an
