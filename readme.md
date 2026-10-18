@@ -70,7 +70,7 @@ internal/peer/        almacenamiento, servidor, cliente, transferencia, cifrado,
 internal/shared/      modelo de datos común y configuración de TLS (tlsconf)
 deploy/               Dockerfile, docker-compose, certificados y scripts de prueba
 superpeer-openapi.yaml, peer-openapi.yaml    contratos de las dos APIs
-docs/requisitos.md    requisitos del sistema
+docs/despliegueaws.md  guía de despliegue en AWS (pendiente)
 ```
 
 ## 3. Reproducirlo en local
@@ -80,7 +80,7 @@ Todo corre en contenedores: **2 superpeers y 3 peers**, con TLS, en una sola má
 ### Requisitos
 - **Docker** (en Windows, Docker Desktop abierto y corriendo).
 - **bash** para los scripts de `deploy/`:
-  - En **Windows**, **Git Bash** (no PowerShell: ahí `bash` abre WSL y no encuentra Docker). Ya trae `openssl`.
+  - En **Windows**, Git Bash, ya trae `openssl`.
   - En **Linux**, `bash` y **`openssl`** instalado.
 
 ### Paso 1: certificados
@@ -102,114 +102,101 @@ curl -si --ssl-no-revoke --cacert deploy/certs/out/ca.crt https://localhost:8082
 (`--ssl-no-revoke` solo hace falta con el `curl` de Windows; en Linux no hace nada.)
 
 ### Paso 3: probar la línea de comandos a mano
-Se usan **cuatro terminales** (en Windows, cuatro Git Bash abiertas en la carpeta del repositorio): una de control (**T0**) y tres peers, cada uno en la suya.
 
-| Terminal | Qué hace | Comando |
+Se usan **cuatro terminales**. En Windows, son cuatro Git Bash abiertas en la carpeta del repositorio.
+
+| Terminal | Para qué sirve | Comando |
 |---|---|---|
-| **T0** | Control: mirar y matar nodos | los comandos de los ejemplos |
+| **T0** | Control: crear el archivo de prueba, comprobar resultados y matar nodos | los de los ejemplos |
 | **T1** | peer1, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer1` |
 | **T2** | peer2, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer2` |
-| **T3** | peer3, usuario `bob` / `bob1234` | `bash deploy/demo-peer.sh peer3` |
+| **T3** | peer3, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer3` |
 
-Cada peer pide usuario y contraseña, y muestra el prompt `dfsha:/>`. Los usuarios están dados de alta en el superpeer. Los archivos que quieras subir se dejan en `deploy/demo-files/<peer>/`, que dentro del peer es la carpeta de trabajo. La imagen del peer se construye sola la primera vez; si cambias el código, reconstrúyela con `docker build -f deploy/Dockerfile --build-arg CMD=peer -t dfsha-peer .`.
+Antes de empezar, abre los tres peers (T1, T2 y T3), cada uno en su terminal.
 
-Los ejemplos siguientes se pueden hacer en ese orden.
+Cada peer:
 
-#### Ejemplo 1: subir en un peer y bajar en otro (transparencia)
-En **T0**, crea un archivo de prueba:
-```bash
-mkdir -p deploy/demo-files/peer1
-printf 'Informe de prueba de DFSha\nlinea dos\n' > deploy/demo-files/peer1/informe.txt
-```
-En **T1**:
-```
-mkdir docs
-cd docs
-put informe.txt
-```
-Responde `uploaded /docs/informe.txt (37 bytes, id ...)`. En **T2**:
-```
-ls /docs
-get /docs/informe.txt copia.txt
-```
-`ls` muestra `informe.txt` y `get` responde `downloaded /docs/informe.txt -> copia.txt (37 bytes)`. Comprobar en **T0**: `cat deploy/demo-files/peer2/copia.txt` muestra el mismo texto. El peer2 nunca escribió la dirección de nadie: el superpeer le dijo dónde estaba cada chunk.
+- pide usuario y contraseña (los usuarios están dados de alta en el superpeer) y muestra el prompt `dfsha:/>`;
+- usa como carpeta de trabajo `deploy/demo-files/<peer>/`: ahí se dejan los archivos que se quieren subir y ahí caen los que se bajan;
+- construye su imagen de Docker solo la primera vez. Si cambias el código, reconstrúyela con `docker build -f deploy/Dockerfile --build-arg CMD=peer -t dfsha-peer .`
 
-#### Ejemplo 2: dónde quedaron los chunks y que están cifrados
-En **T0**:
-```bash
-docker exec dfsha-peer1 sh -c 'find /data/chunks -type f'
-docker exec dfsha-peer2 sh -c 'find /data/chunks -type f'
-docker exec dfsha-peer1 sh -c 'head -c 48 $(find /data/chunks -type f | head -1) | od -c | head -4'
-```
-Aparece una ruta `/data/chunks/<usuario>/<id-del-archivo>/0` en dos peers (cada chunk está en 2 de los 3). Los bytes que muestra la tercera orden son ilegibles: lo guardado va cifrado. (Los comandos con rutas absolutas van dentro de `sh -c '…'` para que Git Bash no las convierta en rutas de Windows.)
+Los ejemplos se hacen en este orden.
 
-#### Ejemplo 3: cada usuario ve solo lo suyo
-En **T3**, que es `bob`:
-```
-ls /
-ls /docs
-get /docs/informe.txt x.txt
-```
-`ls /` no muestra nada, y las otras dos dan `error: not found (HTTP 404 …)`.
+#### Ejemplo 1: subir en un peer y bajar en otro
 
-#### Ejemplo 4: locks
-| Terminal | Comando | Resultado |
-|---|---|---|
-| T1 | `lock /docs/informe.txt` | `locked /docs/informe.txt (until unlock or exit)` |
-| T2 | `lock /docs/informe.txt` | `error: conflict: it already exists or is locked by someone else (HTTP 409 …)` |
-| T1 | `unlock /docs/informe.txt` | `unlocked /docs/informe.txt` |
-| T2 | `lock /docs/informe.txt` | `locked /docs/informe.txt …` (ahora sí) |
-| T2 | `unlock /docs/informe.txt` | `unlocked /docs/informe.txt` |
+Muestra la transparencia: el peer que baja el archivo nunca escribe la dirección de nadie. El superpeer le dice dónde está cada chunk.
 
-El lock dura 30 s en el superpeer, pero el CLI lo renueva mientras lo tiene: aunque pasen más de 30 s, T2 sigue recibiendo conflicto hasta que T1 haga `unlock`.
+| Paso | Terminal | Comando | Debes ver |
+|---|---|---|---|
+| 1 | T0 | `mkdir -p deploy/demo-files/peer1` | — |
+| 2 | T0 | `printf 'Informe de prueba de DFSha\nlinea dos\n' > deploy/demo-files/peer1/informe.txt` | — |
+| 3 | T1 | `mkdir docs` | — |
+| 4 | T1 | `cd docs` | el prompt pasa a `dfsha:/docs>` |
+| 5 | T1 | `put informe.txt` | `uploaded /docs/informe.txt (37 bytes, id …)` |
+| 6 | T2 | `ls /docs` | `informe.txt` |
+| 7 | T2 | `get /docs/informe.txt copia.txt` | `downloaded /docs/informe.txt -> copia.txt (37 bytes)` |
+| 8 | T0 | `cat deploy/demo-files/peer2/copia.txt` | el mismo texto del paso 2 |
 
-#### Ejemplo 5: modificar un archivo
-En **T1**: `mdf /docs/informe.txt`. Abre el editor `vi`: pulsa `i`, escribe algo, pulsa `Esc`, escribe `:wq` y Enter. Responde `modified /docs/informe.txt (… bytes, id …)`. Si sales sin cambios (`Esc`, `:q!`), responde `no changes, nothing uploaded`. Para ver el cambio, en **T2** haz `get /docs/informe.txt nuevo.txt` y en **T0** `cat deploy/demo-files/peer2/nuevo.txt`.
+#### Ejemplo 2: locks
 
-#### Ejemplo 6: se cae un peer
-Sube un archivo desde T1 (`put informe.txt /docs/otro.txt`) y en **T0**:
-```bash
-docker kill dfsha-peer3
-```
-Espera unos 25 s. El superpeer lo da por caído y re-replica lo que tenía. En **T2**, `get /docs/otro.txt otro.txt` sigue funcionando, porque cada chunk tiene otra copia.
+Un lock impide que otro peer bloquee el mismo archivo. Dura 30 s en el superpeer, pero el CLI lo renueva mientras lo tiene.
 
-#### Ejemplo 7: se cae el superpeer líder y el standby lo sustituye
-En **T0**:
-```bash
-docker compose -f deploy/docker-compose.yml kill sp1
-```
-Mientras esperas unos 20 s, T1 y T2 muestran líneas de log como éstas, que son lo esperado:
+| Paso | Terminal | Comando | Debes ver |
+|---|---|---|---|
+| 1 | T1 | `lock /docs/informe.txt` | `locked /docs/informe.txt (until unlock or exit)` |
+| 2 | T2 | `lock /docs/informe.txt` | `error: conflict: it already exists or is locked by someone else (HTTP 409 …)` |
+| 3 | T1 | `unlock /docs/informe.txt` | `unlocked /docs/informe.txt` |
+| 4 | T2 | `lock /docs/informe.txt` | `locked /docs/informe.txt …` (ahora sí) |
+| 5 | T2 | `unlock /docs/informe.txt` | `unlocked /docs/informe.txt` |
+
+Si esperas más de 30 s entre los pasos 1 y 2, T2 sigue recibiendo conflicto: T1 renovó el lock.
+
+#### Ejemplo 3: se cae un peer
+
+Muestra que un archivo sigue disponible aunque un peer se caiga, porque cada chunk tiene otra copia.
+
+| Paso | Terminal | Comando | Debes ver |
+|---|---|---|---|
+| 1 | T1 | `put informe.txt /docs/otro.txt` | `uploaded /docs/otro.txt (…)` |
+| 2 | T0 | `docker kill dfsha-peer3` | — |
+| 3 | — | espera unos 25 s | el superpeer da por caído a peer3 y re-replica lo que tenía |
+| 4 | T2 | `get /docs/otro.txt otro.txt` | `downloaded /docs/otro.txt -> otro.txt (…)` |
+
+#### Ejemplo 4: se cae el superpeer líder y el standby lo sustituye
+
+Muestra que el sistema sigue funcionando cuando se cae el superpeer líder, sin volver a iniciar sesión.
+
+| Paso | Terminal | Comando | Debes ver |
+|---|---|---|---|
+| 1 | T0 | `docker compose -f deploy/docker-compose.yml kill sp1` | — |
+| 2 | T1 y T2 | espera unos 20 s | líneas de log del peer (ver abajo) |
+| 3 | T0 | el `curl` del puerto 8082 del Paso 2 | `X-Superpeer-Role: leader` |
+| 4 | T1 y T2 | `ls /docs` | `informe.txt` y `otro.txt` |
+| 5 | T0 | `docker compose -f deploy/docker-compose.yml start sp1` | — |
+| 6 | T0 | los dos `curl` del Paso 2 (puertos 8081 y 8082) | sp1 en `standby` y sp2 en `leader` |
+
+Durante la espera del paso 2, T1 y T2 muestran líneas como éstas. Es lo esperado: el peer va probando y cambia de superpeer.
+
 ```
 heartbeat to https://sp1:8080 failed (1/3): superpeer unavailable ...
 switching superpeer: https://sp1:8080 -> https://sp2:8080
 heartbeat to https://sp2:8080 failed (1/3): ... HTTP 421: this superpeer is on standby ...
 ```
-Después, en **T0**, sp2 ya es el líder:
-```bash
-curl -si --ssl-no-revoke --cacert deploy/certs/out/ca.crt https://localhost:8082/health | grep -i x-superpeer-role   # leader
-```
-Y en **T1** y **T2**, `ls /docs` funciona de nuevo, sin volver a iniciar sesión (si escribes antes de que termine el cambio, dice `superpeer unreachable; try again…`: espera unos segundos). Para devolver el nodo:
-```bash
-docker compose -f deploy/docker-compose.yml start sp1
-```
-sp1 vuelve como `standby` y sp2 sigue de `leader`.
 
-#### Ejemplo 8: TLS
-En **T0**:
-```bash
-curl -s --ssl-no-revoke -o /dev/null -w '%{http_code}\n' https://localhost:8082/health                                          # 000: no confía en la CA
-curl -s --ssl-no-revoke --cacert deploy/certs/out/ca.crt -o /dev/null -w '%{http_code}\n' https://localhost:8082/health        # 200
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8082/health                                                            # 400: HTTP plano rechazado
-```
+Si escribes un comando antes de que termine el cambio, el CLI dice `superpeer unreachable; try again…`. Espera unos segundos y repite.
 
 #### Al terminar
-Escribe `exit` en T1, T2 y T3, y en **T0**:
+
+1. Escribe `exit` en T1, T2 y T3.
+2. En **T0**, borra todo:
+
 ```bash
 docker compose -f deploy/docker-compose.yml down -v
 docker volume rm dfsha-peer1-data dfsha-peer2-data dfsha-peer3-data
 rm -rf deploy/demo-files
 ```
-El `volume rm` es necesario: los datos de los peers abiertos a mano viven en volúmenes que `down -v` no borra.
+
+El `docker volume rm` es necesario: los datos de los peers abiertos a mano viven en volúmenes que `down -v` no borra.
 
 ### Comandos de la línea de comandos
 | Comando | Qué hace |
