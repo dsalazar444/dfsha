@@ -1,2 +1,5 @@
 .directory
 .env
+
+# archivos de prueba de deploy/demo-peer.sh
+deploy/demo-files/

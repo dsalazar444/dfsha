@@ -59,18 +59,15 @@ type Config struct {
 	SuperpeerID string
 }
 
-// TODO(final): TLS es opcional mientras se desarrolla el proyecto, por lo que las
-// ejecuciones locales no necesitan certificados.
-// Antes de entregar el proyecto, se debe hacer obligatorio cambiando estos dos valores
-// predeterminados sin cambiar nada mas en el codigo:
-//   - defaultAllowInsecure -> false  (el superpeer se negará a iniciar si no
-//     están definidos TLS_CERT y TLS_KEY)
-//   - defaultPeerScheme    -> "https"
+// TLS es obligatorio por defecto: sin TLS_CERT y TLS_KEY el superpeer se niega a iniciar, y los peers
+// se reparten con URLs https. Para desarrollo local sin certificados hay que pedirlo de forma explícita:
 //
-// El peer y la CLI tienen su propia configuración y también deben modificarse.
+//	ALLOW_INSECURE=true PEER_SCHEME=http
+//
+// El peer y la CLI tienen su propia configuración (internal/peer/config) con el mismo criterio.
 const (
-	defaultAllowInsecure = true
-	defaultPeerScheme    = "http"
+	defaultAllowInsecure = false
+	defaultPeerScheme    = "https"
 )
 
 const (

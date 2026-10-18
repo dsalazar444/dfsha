@@ -9,6 +9,7 @@
 #   ca.crt            certificado de la CA: lo reparten TODOS los nodos y el CLI para confiar en los demás
 #   ca.key            clave de la CA: es lo más delicado, con ella se fabrican certificados válidos. NO se reparte
 #   <nodo>.crt/.key   certificado y clave de cada nodo: cada nodo recibe solo los suyos
+#                     sirve como certificado de servidor y de cliente: los peers se piden certificado entre sí (mTLS)
 
 # Si ya existe una CA se reutiliza, así los certificados que ya se repartieron siguen valiendo.
 
@@ -71,7 +72,7 @@ for spec in "${NODES[@]}"; do
   echo "Certificado de $node  ($san)"
   openssl ecparam -name prime256v1 -genkey -noout -out "$node.key"
   openssl req -new -key "$node.key" -subj "/CN=$node" -out "$node.csr"
-  printf 'subjectAltName=%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\n' "$san" > "$node.ext"
+  printf 'subjectAltName=%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth,clientAuth\n' "$san" > "$node.ext"
   openssl x509 -req -in "$node.csr" -CA "ca.crt" -CAkey "ca.key" -CAcreateserial \
     -sha256 -days "$NODE_DAYS" -extfile "$node.ext" -out "$node.crt" 2> /dev/null
   rm -f "$node.csr" "$node.ext"

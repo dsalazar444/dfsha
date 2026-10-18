@@ -1,4 +1,4 @@
-package peer
+package main
 
 import (
 	"bufio"
@@ -22,6 +22,7 @@ import (
 	"dfsha/internal/peer/storage"
 	"dfsha/internal/peer/transfer"
 	"dfsha/internal/shared/model"
+	"dfsha/internal/shared/tlsconf"
 )
 
 const (
@@ -82,7 +83,11 @@ func (a *app) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	httpClient := http_client.NewHTTPClient(httpTimeout, a.cfg.MaxChunkSizeMB)
+	tlsClient, err := tlsconf.NewClient(a.cfg.TLSCA, a.cfg.TLSCert, a.cfg.TLSKey, httpTimeout) // trusts the DFSha CA and shows our certificate to the peers that ask for it
+	if err != nil {
+		return fmt.Errorf("TLS: %w", err)
+	}
+	httpClient := http_client.NewHTTPClientWith(tlsClient, a.cfg.MaxChunkSizeMB)
 	superpeer := client.NewSuperpeerClient(pool, httpClient)
 	peers := client.NewPeerClient(httpClient)
 
@@ -115,8 +120,13 @@ func (a *app) run(ctx context.Context) error {
 		Handler:           server.NewServer(store, superpeer, peerID, a.cfg.MaxChunkSizeMB).Routes(),
 		ReadHeaderTimeout: 10 * time.Second, // do not let a client hold a connection open without sending headers
 	}
+	if a.cfg.TLSCert != "" { // mutual TLS: only nodes with a certificate of our CA can reach the chunk endpoints
+		if err := tlsconf.RequireClientCert(httpServer, a.cfg.TLSCA); err != nil {
+			return fmt.Errorf("TLS: %w", err)
+		}
+	}
 	go func() {
-		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		if err := tlsconf.Serve(httpServer, listener, a.cfg.TLSCert, a.cfg.TLSKey, a.cfg.AllowInsecure); !errors.Is(err, http.ErrServerClosed) {
 			cancel(fmt.Errorf("HTTP server stopped: %w", err))
 		}
 	}()

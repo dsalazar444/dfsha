@@ -38,11 +38,18 @@ type HTTPClient struct {
 // request, including reading the body; callers can set a tighter one per
 // request with the context.
 func NewHTTPClient(timeout time.Duration, maxChunkSizeMB int) *HTTPClient { // timeout es tiempo máximo que puede consumir una petición ejecutada por el cliente (cubre la petición completa, incluida la lectura del cuerpo de la respuesta.)
+	return NewHTTPClientWith(&http.Client{Timeout: timeout}, maxChunkSizeMB)
+}
+
+// NewHTTPClientWith is NewHTTPClient with a ready-made *http.Client, which is
+// how TLS gets in: tlsconf.NewClient builds one that trusts the DFSha CA, and
+// it already carries its own timeout.
+func NewHTTPClientWith(client *http.Client, maxChunkSizeMB int) *HTTPClient {
 	if maxChunkSizeMB <= 0 {
 		maxChunkSizeMB = int(defaultMaxChunkSizeMB)
 	}
 	return &HTTPClient{
-		client:  &http.Client{Timeout: timeout},
+		client:  client,
 		maxBody: int64(maxChunkSizeMB)<<20 + (1 << 20),
 	}
 }

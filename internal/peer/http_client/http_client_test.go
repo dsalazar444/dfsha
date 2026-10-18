@@ -1,7 +1,12 @@
 package http_client
 
 import (
+	"encoding/pem"
+	"os"
+	"path/filepath"
+
 	"context"
+	"dfsha/internal/shared/tlsconf"
 	"errors"
 	"io"
 	"net/http"
@@ -205,5 +210,34 @@ func TestAsSuperpeerError(t *testing.T) {
 	}
 	if AsSuperpeerError(nil) != nil {
 		t.Error("nil must stay nil")
+	}
+}
+
+// A client built with tlsconf trusts a server only if its certificate comes from the CA file.
+func TestDoOverTLSTrustsOnlyTheGivenCA(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("secure"))
+	}))
+	defer srv.Close()
+
+	// The test server's own certificate plays the role of the CA.
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caFile, pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	trusting, err := tlsconf.NewClient(caFile, "", "", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := get(t, NewHTTPClientWith(trusting, 64), srv.URL)
+	if err != nil || string(body) != "secure" {
+		t.Fatalf("with the CA: got %q, %v", body, err)
+	}
+
+	// Without the CA the same server is rejected, and reported as unreachable.
+	if _, err := get(t, newTestClient(), srv.URL); !errors.Is(err, ErrUnreachable) {
+		t.Errorf("without the CA: err = %v, want ErrUnreachable", err)
 	}
 }

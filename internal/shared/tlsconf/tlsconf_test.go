@@ -60,7 +60,7 @@ func makeCA(t *testing.T, dir, name string) (caFile string, issue func() (certFi
 			NotAfter:     time.Now().Add(time.Hour),
 			IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
 			KeyUsage:     x509.KeyUsageDigitalSignature,
-			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		}
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
 		if err != nil {
@@ -127,7 +127,7 @@ func get(client *http.Client, url string) (string, error) {
 
 func newClient(t *testing.T, caFile string) *http.Client {
 	t.Helper()
-	client, err := NewClient(caFile, 3*time.Second)
+	client, err := NewClient(caFile, "", "", 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,12 +201,12 @@ func TestOnlyOneOfCertAndKeyIsAnError(t *testing.T) {
 }
 
 func TestNewClientRejectsBadCAFile(t *testing.T) {
-	if _, err := NewClient(filepath.Join(t.TempDir(), "no-existe.crt"), time.Second); err == nil {
+	if _, err := NewClient(filepath.Join(t.TempDir(), "no-existe.crt"), "", "", time.Second); err == nil {
 		t.Error("accepted a CA file that does not exist")
 	}
 	notACert := filepath.Join(t.TempDir(), "x.crt")
 	_ = os.WriteFile(notACert, []byte("esto no es un certificado"), 0o600)
-	if _, err := NewClient(notACert, time.Second); err == nil {
+	if _, err := NewClient(notACert, "", "", time.Second); err == nil {
 		t.Error("accepted a file that is not a certificate")
 	}
 }
@@ -254,4 +254,113 @@ func certHasName(t *testing.T, certFile, name string) bool {
 		t.Fatal(err)
 	}
 	return cert.VerifyHostname(name) == nil
+}
+
+// Serve works on a listener that is already open (what the peer does)
+func TestServeUsesAnOpenListener(t *testing.T) {
+	dir := t.TempDir()
+	caFile, issue := makeCA(t, dir, "ca")
+	certFile, keyFile := issue()
+	client, err := NewClient(caFile, "", "", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, cert, key, scheme string
+	}{
+		{"with certificate", certFile, keyFile, "https"},
+		{"without certificate", "", "", "http"},
+	} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("hello")) })}
+		t.Cleanup(func() { srv.Close() })
+		go Serve(srv, ln, tc.cert, tc.key, true)
+
+		url := tc.scheme + "://" + ln.Addr().String()
+		var body string
+		for i := 0; i < 50; i++ { // the goroutine needs a moment to start
+			if body, err = get(client, url); err == nil {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if err != nil || body != "hello" {
+			t.Errorf("%s: got %q, %v", tc.name, body, err)
+		}
+	}
+
+	// The rules are the same as ListenAndServe's.
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	if err := Serve(&http.Server{}, ln, "", "", false); err == nil {
+		t.Error("Serve started without TLS and without ALLOW_INSECURE")
+	}
+	if err := Serve(&http.Server{}, ln, "only.crt", "", true); err == nil {
+		t.Error("Serve accepted a certificate without a key")
+	}
+}
+
+// Mutual TLS: the server accepts only clients that show a certificate signed by its CA
+func TestRequireClientCert(t *testing.T) {
+	dir := t.TempDir()
+	caFile, issue := makeCA(t, dir, "ca")
+	serverCert, serverKey := issue()
+	clientCert, clientKey := issue() // a node of the system: same CA
+	otherCA, otherIssue := makeCA(t, dir, "otra")
+	strangerCert, strangerKey := otherIssue() // signed by a CA that is not ours
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("hello")) })}
+	if err := RequireClientCert(srv, caFile); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go Serve(srv, ln, serverCert, serverKey, false)
+	url := "https://" + ln.Addr().String()
+
+	try := func(ca, cert, key string) error {
+		client, err := NewClient(ca, cert, key, 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body string
+		for i := 0; i < 50; i++ { // the goroutine needs a moment to start
+			if body, err = get(client, url); err == nil && body == "hello" {
+				return nil
+			}
+			if err != nil && strings.Contains(err.Error(), "refused") {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			break
+		}
+		return err
+	}
+
+	if err := try(caFile, clientCert, clientKey); err != nil {
+		t.Errorf("client with a certificate of our CA: %v", err)
+	}
+	if err := try(caFile, "", ""); err == nil {
+		t.Error("client WITHOUT a certificate was accepted")
+	}
+	if err := try(caFile, strangerCert, strangerKey); err == nil {
+		t.Error("client with a certificate of ANOTHER CA was accepted")
+	}
+	_ = otherCA
+}
+
+func TestNewClientNeedsCertAndKeyTogether(t *testing.T) {
+	if _, err := NewClient("", "c.crt", "", time.Second); err == nil {
+		t.Error("a certificate without its key was accepted")
+	}
+	if _, err := NewClient("", "", "k.key", time.Second); err == nil {
+		t.Error("a key without its certificate was accepted")
+	}
 }
