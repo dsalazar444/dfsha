@@ -124,3 +124,30 @@ F=
 		}
 	}
 }
+
+func TestLoadTLS(t *testing.T) {
+	file := writeEnvFile(t, minimal)
+
+	// Without TLS variables: plain HTTP is allowed (default).
+	cfg, err := load(file, env(nil))
+	if err != nil || !cfg.AllowInsecure || cfg.TLSCert != "" {
+		t.Fatalf("default: %+v, %v", cfg, err)
+	}
+
+	// Certificate, key and CA are read.
+	cfg, err = load(file, env(map[string]string{"TLS_CERT": "c.crt", "TLS_KEY": "c.key", "TLS_CA": "ca.crt", "ALLOW_INSECURE": "false"}))
+	if err != nil || cfg.TLSCert != "c.crt" || cfg.TLSKey != "c.key" || cfg.TLSCA != "ca.crt" || cfg.AllowInsecure {
+		t.Errorf("with TLS: %+v, %v", cfg, err)
+	}
+
+	for name, vars := range map[string]map[string]string{
+		"only the certificate": {"TLS_CERT": "c.crt"},
+		"only the key":         {"TLS_KEY": "c.key"},
+		"insecure forbidden":   {"ALLOW_INSECURE": "false"},
+		"bad boolean":          {"ALLOW_INSECURE": "maybe"},
+	} {
+		if _, err := load(file, env(vars)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}

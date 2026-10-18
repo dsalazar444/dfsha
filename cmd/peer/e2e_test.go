@@ -345,7 +345,7 @@ func startPeer(t *testing.T, superpeerURLs, username, password string) *peerProc
 		cfg: config.Config{
 			SuperpeerURLs: superpeerURLs, PeerAddress: "127.0.0.1", PeerPort: port,
 			StoragePath: p.dataDir, HeartbeatInterval: 50 * time.Millisecond,
-			ChunkSize: 64, Parallelism: 3,
+			ChunkSize: 64, Parallelism: 3, AllowInsecure: true, // these tests talk plain HTTP to a fake superpeer
 		},
 		in: bufio.NewReader(p.in), out: p.out, terminal: false, listener: listener,
 	}

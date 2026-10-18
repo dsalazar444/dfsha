@@ -255,3 +255,51 @@ func certHasName(t *testing.T, certFile, name string) bool {
 	}
 	return cert.VerifyHostname(name) == nil
 }
+
+// Serve works on a listener that is already open (what the peer does)
+func TestServeUsesAnOpenListener(t *testing.T) {
+	dir := t.TempDir()
+	caFile, issue := makeCA(t, dir, "ca")
+	certFile, keyFile := issue()
+	client, err := NewClient(caFile, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, cert, key, scheme string
+	}{
+		{"with certificate", certFile, keyFile, "https"},
+		{"without certificate", "", "", "http"},
+	} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("hello")) })}
+		t.Cleanup(func() { srv.Close() })
+		go Serve(srv, ln, tc.cert, tc.key, true)
+
+		url := tc.scheme + "://" + ln.Addr().String()
+		var body string
+		for i := 0; i < 50; i++ { // the goroutine needs a moment to start
+			if body, err = get(client, url); err == nil {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if err != nil || body != "hello" {
+			t.Errorf("%s: got %q, %v", tc.name, body, err)
+		}
+	}
+
+	// The rules are the same as ListenAndServe's.
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	if err := Serve(&http.Server{}, ln, "", "", false); err == nil {
+		t.Error("Serve started without TLS and without ALLOW_INSECURE")
+	}
+	if err := Serve(&http.Server{}, ln, "only.crt", "", true); err == nil {
+		t.Error("Serve accepted a certificate without a key")
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -27,21 +28,46 @@ import (
 //
 // Like http.Server.ListenAndServe, it blocks until the server stops
 func ListenAndServe(srv *http.Server, certFile, keyFile string, allowPlain bool) error {
-	switch {
-	case certFile != "" && keyFile != "":
+	useTLS, err := mode(certFile, keyFile, allowPlain)
+	if err != nil {
+		return err
+	}
+	if useTLS {
 		log.Printf("[tls] serving HTTPS on %s", srv.Addr)
 		return srv.ListenAndServeTLS(certFile, keyFile)
-
-	case certFile != "" || keyFile != "":
-		return errors.New("TLS needs both the certificate and the key (TLS_CERT and TLS_KEY), only one was given")
-
-	case !allowPlain:
-		return errors.New("TLS is required: set TLS_CERT and TLS_KEY (or ALLOW_INSECURE=true for local tests only)")
-
-	default:
-		log.Printf("[tls] WARNING: no certificate, serving plain HTTP on %s — traffic is not encrypted", srv.Addr)
-		return srv.ListenAndServe()
 	}
+	log.Printf("[tls] WARNING: no certificate, serving plain HTTP on %s — traffic is not encrypted", srv.Addr)
+	return srv.ListenAndServe()
+}
+
+// Serve is ListenAndServe for a listener that is already open (the peer opens its port before
+// it registers with the superpeer, and only starts answering afterwards)
+// It does not close ln when the server fails to start
+func Serve(srv *http.Server, ln net.Listener, certFile, keyFile string, allowPlain bool) error {
+	useTLS, err := mode(certFile, keyFile, allowPlain)
+	if err != nil {
+		return err
+	}
+	if useTLS {
+		log.Printf("[tls] serving HTTPS on %s", ln.Addr())
+		return srv.ServeTLS(ln, certFile, keyFile)
+	}
+	log.Printf("[tls] WARNING: no certificate, serving plain HTTP on %s — traffic is not encrypted", ln.Addr())
+	return srv.Serve(ln)
+}
+
+// mode decides between HTTPS (true) and plain HTTP (false), or refuses: the single place with the
+// rules that ListenAndServe and Serve share
+func mode(certFile, keyFile string, allowPlain bool) (useTLS bool, err error) {
+	switch {
+	case certFile != "" && keyFile != "":
+		return true, nil
+	case certFile != "" || keyFile != "":
+		return false, errors.New("TLS needs both the certificate and the key (TLS_CERT and TLS_KEY), only one was given")
+	case !allowPlain:
+		return false, errors.New("TLS is required: set TLS_CERT and TLS_KEY (or ALLOW_INSECURE=true for local tests only)")
+	}
+	return false, nil
 }
 
 // NewClient returns an http.Client that trusts the servers whose certificate was signed by the CA in caFile

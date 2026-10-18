@@ -33,6 +33,11 @@ const (
 	defaultParallelism       = 4
 )
 
+// TODO(final): TLS es opcional mientras se desarrolla el proyecto. Al final hay que
+// cambiar defaultAllowInsecure a false (igual que en el superpeer), para que el peer
+// se niegue a iniciar sin TLS_CERT y TLS_KEY
+const defaultAllowInsecure = true
+
 // Config is the validated configuration of one peer process.
 type Config struct {
 	// SuperpeerURLs is the comma-separated, ordered list of superpeer base
@@ -69,6 +74,20 @@ type Config struct {
 
 	// Username pre-fills the login prompt (DFSHA_USERNAME). Optional.
 	Username string
+
+	// TLSCert and TLSKey are the files of this peer's certificate and private key
+	// (deploy/certs/gen-certs.sh). With both set the peer serves HTTPS
+	// (TLS_CERT, TLS_KEY). Setting only one is an error.
+	TLSCert string
+	TLSKey  string
+
+	// TLSCA is the CA certificate (TLS_CA) used to trust the superpeers and the other
+	// peers when they are reached over https. Empty: the system's CAs.
+	TLSCA string
+
+	// AllowInsecure lets the peer serve plain HTTP when it has no certificate
+	// (ALLOW_INSECURE, local development and tests).
+	AllowInsecure bool
 }
 
 // Load reads envFile (if it exists) and the process environment and
@@ -97,6 +116,26 @@ func load(envFile string, lookupEnv func(string) (string, bool)) (Config, error)
 		PeerPort:      get("PEER_PORT"),
 		StoragePath:   get("STORAGE_PATH"),
 		Username:      get("DFSHA_USERNAME"),
+		TLSCert:       get("TLS_CERT"),
+		TLSKey:        get("TLS_KEY"),
+		TLSCA:         get("TLS_CA"),
+	}
+
+	// Checked here, and not when the server starts, so a typo fails before the
+	// login prompt and not after it.
+	if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
+		return Config{}, errors.New("TLS_CERT and TLS_KEY must be set together")
+	}
+	cfg.AllowInsecure = defaultAllowInsecure
+	if v := get("ALLOW_INSECURE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("ALLOW_INSECURE must be true or false, got %q", v)
+		}
+		cfg.AllowInsecure = b
+	}
+	if cfg.TLSCert == "" && !cfg.AllowInsecure {
+		return Config{}, errors.New("TLS is required: set TLS_CERT and TLS_KEY (or ALLOW_INSECURE=true for local tests only)")
 	}
 
 	// Required settings first, with the variable name in the message.

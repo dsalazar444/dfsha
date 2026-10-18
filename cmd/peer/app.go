@@ -22,6 +22,7 @@ import (
 	"dfsha/internal/peer/storage"
 	"dfsha/internal/peer/transfer"
 	"dfsha/internal/shared/model"
+	"dfsha/internal/shared/tlsconf"
 )
 
 const (
@@ -82,7 +83,11 @@ func (a *app) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	httpClient := http_client.NewHTTPClient(httpTimeout, a.cfg.MaxChunkSizeMB)
+	tlsClient, err := tlsconf.NewClient(a.cfg.TLSCA, httpTimeout) // trusts the DFSha CA for https superpeers and peers
+	if err != nil {
+		return fmt.Errorf("TLS: %w", err)
+	}
+	httpClient := http_client.NewHTTPClientWith(tlsClient, a.cfg.MaxChunkSizeMB)
 	superpeer := client.NewSuperpeerClient(pool, httpClient)
 	peers := client.NewPeerClient(httpClient)
 
@@ -116,7 +121,7 @@ func (a *app) run(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second, // do not let a client hold a connection open without sending headers
 	}
 	go func() {
-		if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		if err := tlsconf.Serve(httpServer, listener, a.cfg.TLSCert, a.cfg.TLSKey, a.cfg.AllowInsecure); !errors.Is(err, http.ErrServerClosed) {
 			cancel(fmt.Errorf("HTTP server stopped: %w", err))
 		}
 	}()
