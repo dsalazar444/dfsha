@@ -47,14 +47,24 @@ import (
 // data contains all the file
 
 func (t *Transfer) Put(ctx context.Context, logicalPath string, data []byte) (string, error) {
+	return t.PutWithFileID(ctx, logicalPath, data, "") // Función para cuando no contamos con fileID
+}
+
+// PutWithFileID uploads data as the file at logicalPath and reuses the
+// provided fileID when non-empty. If fileID is empty, a fresh ID is generated.
+func (t *Transfer) PutWithFileID(ctx context.Context, logicalPath string, data []byte, fileID string) (string, error) {
 	if len(data) == 0 {
 		return "", ErrEmptyFile
 	}
-
-	fileID, err := newFileID()
-	if err != nil {
-		return "", err
+	// Si no nos dan fileID, lo generamos
+	if fileID == "" {
+		var err error
+		fileID, err = newFileID()
+		if err != nil {
+			return "", err
+		}
 	}
+
 	// derivamos fileKey
 	fileKey, err := crypto.DeriveFileKey(t.masterKey, fileID)
 	if err != nil {

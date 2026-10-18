@@ -306,12 +306,12 @@ func (s *Sender) startTask(ctx context.Context, task model.ReplicationTask) {
 //
 // Like receiveChunk, it never decrypts anything: this peer has no keys.
 func (s *Sender) runTask(ctx context.Context, task model.ReplicationTask) error {
-	// DELETE tasks only remove the local chunk and then acknowledge it.
+	// DELETE tasks only remove the local chunk, there is no necesity to send ack
 	if task.Action == model.ReplicationActionDelete {
 		if err := s.store.Delete(task.OwnerUserID, task.ChunkID); err != nil {
 			return fmt.Errorf("deleting chunk: %w", err)
 		}
-		return nil // No es necesario mandar ACK
+		return nil
 	}
 
 	// We may already hold the chunk if an earlier attempt saved it but

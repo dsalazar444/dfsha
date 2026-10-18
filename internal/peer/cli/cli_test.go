@@ -51,6 +51,27 @@ func (f *fakeSuperpeer) Ls(_ context.Context, p string) ([]model.DirEntry, error
 	}
 	return entries, nil
 }
+func (f *fakeSuperpeer) GetFile(_ context.Context, p string) (model.GetFileResponse, error) {
+	f.calls = append(f.calls, "get-file "+p)
+	if f.err != nil {
+		return model.GetFileResponse{}, f.err
+	}
+	if p == "/" {
+		return model.GetFileResponse{}, &http_client.StatusError{Code: 404, Message: "no such file"}
+	}
+	return model.GetFileResponse{FileID: "file-id-1", Chunks: []model.ChunkLocation{{ChunkID: model.NewChunkID("file-id-1", 0), PeerURLs: []string{"peer1"}, ExpectedHash: "abc"}}}, nil
+}
+func (f *fakeSuperpeer) Lock(_ context.Context, p string) (model.LockResponse, error) {
+	f.calls = append(f.calls, "lock "+p)
+	if f.err != nil {
+		return model.LockResponse{}, f.err
+	}
+	return model.LockResponse{LockID: "lock-1", ExpiresAt: time.Now().Add(5 * time.Second)}, nil
+}
+func (f *fakeSuperpeer) Unlock(_ context.Context, p, lockID string) error {
+	f.calls = append(f.calls, "unlock "+p+" "+lockID)
+	return f.err
+}
 
 // fakeTransfer keeps uploaded files in memory.
 type fakeTransfer struct {
@@ -80,6 +101,20 @@ func (f *fakeTransfer) Get(_ context.Context, p string) ([]byte, error) {
 		return nil, &http_client.StatusError{Code: 404, Message: "no such file"}
 	}
 	return data, nil
+}
+func (f *fakeTransfer) PutWithFileID(_ context.Context, p string, data []byte, fileID string) (string, error) {
+	f.calls = append(f.calls, "put-with-fileid "+p+" "+fileID)
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.files == nil {
+		f.files = map[string][]byte{}
+	}
+	f.files[p] = data
+	if fileID == "" {
+		fileID = "file-id-1"
+	}
+	return fileID, nil
 }
 
 // run feeds script to a fresh CLI and returns everything it printed.

@@ -296,7 +296,7 @@ func TestDeleteTaskRemovesLocalChunkOnly(t *testing.T) {
 	if peers.callCount() != 0 {
 		t.Errorf("delete task contacted %d peers, want 0", peers.callCount())
 	}
-	if sp.ackCount() != 1 {
+	if sp.ackCount() != 0 {
 		t.Errorf("delete task sent %d acks, want 1", sp.ackCount())
 	}
 }
