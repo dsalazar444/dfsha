@@ -31,9 +31,11 @@ func (h *Handler) PutInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		FileID          string   `json:"file_id"`
 		LogicalPath     string   `json:"logical_path"`
 		ChunkCount      int      `json:"chunk_count"`
 		HashOfEachChunk []string `json:"hash_of_each_chunk"`
+		HashPerChunk    []string `json:"hash_per_chunk"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -41,19 +43,28 @@ func (h *Handler) PutInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hashes := body.HashOfEachChunk
+	if len(hashes) == 0 && len(body.HashPerChunk) > 0 {
+		hashes = body.HashPerChunk
+	}
+
 	if body.LogicalPath == "" || body.ChunkCount <= 0 {
 		writeError(w, http.StatusBadRequest, "logical_path and positive chunk_count are required")
 		return
 	}
-	if len(body.HashOfEachChunk) != body.ChunkCount {
-		writeError(w, http.StatusBadRequest, "hash_of_each_chunk length must match chunk_count")
+	if len(hashes) != body.ChunkCount {
+		writeError(w, http.StatusBadRequest, "hashes length must match chunk_count")
 		return
 	}
 
-	fileID, assignments, err := h.service.InitPut(userID, body.LogicalPath, body.ChunkCount, body.HashOfEachChunk)
+	fileID, assignments, err := h.service.InitPut(userID, body.LogicalPath, body.FileID, body.ChunkCount, hashes)
 	if err != nil {
 		if errors.Is(err, store.ErrPathAlreadyExists) {
 			writeError(w, http.StatusConflict, "file already exists at this path")
+			return
+		}
+		if errors.Is(err, ErrFileIDConflict) {
+			writeError(w, http.StatusConflict, "file_id is already in use by another file")
 			return
 		}
 		if errors.Is(err, store.ErrPathNotFound) || errors.Is(err, store.ErrNotADirectory) {

@@ -14,6 +14,7 @@ import (
 var (
 	ErrInsufficientPeers = errors.New("not enough healthy peers to meet replication factor")
 	ErrInvalidChunk      = errors.New("invalid chunk or peer")
+	ErrFileIDConflict    = errors.New("file_id already exists")
 )
 
 // Service manages file operations and chunk assignments
@@ -42,8 +43,10 @@ type Assignment struct {
 	DestinationPeers []string `json:"destination_peers"`
 }
 
-// InitPut starts a file upload by generating assignments for each chunk
-func (s *Service) InitPut(userID, logicalPath string, chunkCount int, hashes []string) (string, []Assignment, error) {
+// InitPut starts a file upload by generating assignments for each chunk.
+// If requestedFileID is non-empty, it validates uniqueness and returns ErrFileIDConflict if taken.
+// If requestedFileID is empty, it generates a new UUID.
+func (s *Service) InitPut(userID, logicalPath, requestedFileID string, chunkCount int, hashes []string) (string, []Assignment, error) {
 	// Get healthy peers
 	healthyPeers := s.peerStore.GetHealthyPeers()
 	if len(healthyPeers) == 0 {
@@ -56,8 +59,16 @@ func (s *Service) InitPut(userID, logicalPath string, chunkCount int, hashes []s
 		actualRepl = len(healthyPeers)
 	}
 
-	//Generate new File ID and link it in the user's filesystem tree
-	fileID := uuid.New().String()
+	// Validate requested fileID or generate new one
+	fileID := requestedFileID
+	if fileID != "" {
+		if _, exists := s.fileStore.GetFile(fileID); exists {
+			return "", nil, ErrFileIDConflict
+		}
+	} else {
+		fileID = uuid.New().String()
+	}
+
 	err := s.fsStore.CreateFile(userID, logicalPath, fileID)
 	if err != nil {
 		return "", nil, fmt.Errorf("creating logical file: %w", err)
