@@ -89,26 +89,30 @@ func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
 
 	for _, file := range files {
 		for _, chunk := range file.Chunks {
-			// Find healthy replicas for this chunk
-			var healthyReplicas []string
-			alreadyAssignedToCaller := false
+			// Count confirmed (ACKed) replicas that are currently healthy
+			var healthyAckedReplicas []string
+			callerAlreadyAcked := false
 
-			for _, pURL := range chunk.Peers {
+			for _, pURL := range chunk.AckedPeers {
 				if pURL == peerURL {
-					alreadyAssignedToCaller = true
+					callerAlreadyAcked = true
 				}
 				if healthyURLs[pURL] {
-					healthyReplicas = append(healthyReplicas, pURL)
+					healthyAckedReplicas = append(healthyAckedReplicas, pURL)
 				}
 			}
 
-			// If the caller is not assigned to this chunk, and the chunk is under-replicated,
-			// and there is at least one healthy replica to copy from:
-			if !alreadyAssignedToCaller && len(healthyReplicas) > 0 && len(healthyReplicas) < s.replFactor {
-				// Pick the first healthy replica as source
-				sourceURL := healthyReplicas[0]
+			// If caller already confirmed having this chunk, no task needed for them
+			if callerAlreadyAcked {
+				continue
+			}
 
-				// Register this peer as assigned for this chunk in FileStore so it can put/ack it later
+			// If the chunk is under-replicated (fewer healthy confirmed copies than replFactor),
+			// and there is at least one healthy confirmed copy to download from:
+			if len(healthyAckedReplicas) > 0 && len(healthyAckedReplicas) < s.replFactor {
+				sourceURL := healthyAckedReplicas[0]
+
+				// Ensure this peer is authorized in Peers so when it finishes it can put/ack it
 				s.fileStore.AddPeerAssignment(chunk.ChunkID, peerURL)
 
 				task := ReplicationTask{
@@ -118,7 +122,6 @@ func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
 					ExpectedHash:  chunk.ExpectedHash,
 				}
 				tasks = append(tasks, task)
-				log.Printf("[peers] Assigned replication task to peer %s for chunk %s from %s", peerID, chunk.ChunkID, sourceURL)
 
 				// Limit to at most 3 tasks per heartbeat to avoid overwhelming the peer
 				if len(tasks) >= 3 {
