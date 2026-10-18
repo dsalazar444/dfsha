@@ -299,7 +299,7 @@ func (s *Sender) startTask(ctx context.Context, task model.ReplicationTask) {
 
 // runTask copies one chunk from another peer to this one.
 //
-// Steps: (1) skip the download if we already have it, (2) try each source
+// Steps for GET: (1) skip the download if we already have it, (2) try each source
 // in order, (3) check the SHA-256 of what arrived against the hash the
 // SUPERPEER gave us (never against anything the source peer says),
 // (4) save atomically, (5) acknowledge.
@@ -311,7 +311,7 @@ func (s *Sender) runTask(ctx context.Context, task model.ReplicationTask) error 
 		if err := s.store.Delete(task.OwnerUserID, task.ChunkID); err != nil {
 			return fmt.Errorf("deleting chunk: %w", err)
 		}
-		return s.ack(task.ChunkID)
+		return nil // No es necesario mandar ACK
 	}
 
 	// We may already hold the chunk if an earlier attempt saved it but
