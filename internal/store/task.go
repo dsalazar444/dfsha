@@ -6,8 +6,8 @@ import "sync"
 
 // DeleteTask es la orden "borra este chunk" que un peer recibe en la respuesta de su heartbeat
 type DeleteTask struct {
-	ChunkID     string
-	OwnerUserID string // el peer lo necesita para ubicar el chunk en su disco
+	ChunkID     string `json:"chunk_id"`
+	OwnerUserID string `json:"owner_user_id"` // el peer lo necesita para ubicar el chunk en su disco
 }
 
 // TaskStore guarda las tareas de borrado pendientes de cada peer.
@@ -44,6 +44,34 @@ func (s *TaskStore) PendingDeletes(peerURL string) []DeleteTask {
 		tasks = append(tasks, task)
 	}
 	return tasks
+}
+
+// Export returns a copy of every pending deletion (keyed by peer URL), to save the state to disk
+func (s *TaskStore) Export() map[string][]DeleteTask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tasks := make(map[string][]DeleteTask, len(s.deletes))
+	for peerURL, byChunk := range s.deletes {
+		for _, task := range byChunk {
+			tasks[peerURL] = append(tasks[peerURL], task)
+		}
+	}
+	return tasks
+}
+
+// Import replaces every pending deletion with the given ones, to load the state from disk
+func (s *TaskStore) Import(tasks map[string][]DeleteTask) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.deletes = make(map[string]map[string]DeleteTask, len(tasks))
+	for peerURL, list := range tasks {
+		s.deletes[peerURL] = make(map[string]DeleteTask, len(list))
+		for _, task := range list {
+			s.deletes[peerURL][task.ChunkID] = task
+		}
+	}
 }
 
 // CompleteDeletes quita las tareas cuyo chunk ya no aparece en la lista del heartbeat:

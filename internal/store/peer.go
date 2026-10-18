@@ -91,6 +91,39 @@ func (s *PeerStore) GetHealthyPeers() []*Peer {
 	return healthy
 }
 
+// PeerRecord is the part of a peer that is worth saving: who it is and where to reach it
+// The rest (free space, chunks, health) is rebuilt by the next heartbeats
+type PeerRecord struct {
+	PeerID  string `json:"peer_id"`
+	Address string `json:"address"`
+	Port    string `json:"port"`
+}
+
+// Export returns the identity of every registered peer, to save the state to disk
+func (s *PeerStore) Export() []PeerRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := make([]PeerRecord, 0, len(s.byID))
+	for _, p := range s.byID {
+		records = append(records, PeerRecord{PeerID: p.PeerID, Address: p.Address, Port: p.Port})
+	}
+	return records
+}
+
+// Import replaces all the peers with the given ones, to load the state from disk
+// They start as unhealthy: a peer only counts as alive after its first heartbeat,
+// so a peer that keeps its peer_id does not need to register again after a restart or a failover
+func (s *PeerStore) Import(records []PeerRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.byID = make(map[string]*Peer, len(records))
+	for _, r := range records {
+		s.byID[r.PeerID] = &Peer{PeerID: r.PeerID, Address: r.Address, Port: r.Port}
+	}
+}
+
 // URL returns the base URL (http://address:port) where the peer can be reached
 // It is the only place that builds peer URLs (switch to https here when TLS arrives)
 func (p *Peer) URL() string {

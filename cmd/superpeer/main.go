@@ -11,6 +11,7 @@ import (
 	"dfsha/internal/fs"
 	"dfsha/internal/locks"
 	"dfsha/internal/peers"
+	"dfsha/internal/persist"
 	"dfsha/internal/server"
 	"dfsha/internal/store"
 	"errors"
@@ -37,6 +38,11 @@ func main() {
 	fileStore := store.NewFileStore()
 	lockStore := store.NewLockStore()
 	taskStore := store.NewTaskStore() // borrados pendientes: los escribe files, los entrega el heartbeat de peers
+
+	// Restore the state saved by a previous run (or by the other superpeer) before serving anything
+	persister := startPersistence(cfg.StateDir, persist.Stores{
+		Peers: peerStore, Fs: fsStore, Files: fileStore, Locks: lockStore, Tasks: taskStore,
+	})
 
 	// Build services
 	authService := auth.NewService(userStore)
@@ -69,6 +75,9 @@ func main() {
 	defer bgCancel() // ensure tasks are cancelled on exit
 	peerService.StartHealthMonitor(bgCtx)
 	lockService.StartExpirySweeper(bgCtx)
+	if persister != nil {
+		persister.Run(bgCtx, stateSaveInterval)
+	}
 
 	// Start listening in a goroutine so we can handle shutdown signals
 	serverErr := make(chan error, 1)
@@ -100,5 +109,35 @@ func main() {
 		log.Fatalf("[superpeer] forced shutdown: %v", err)
 	}
 
+	// Last save, after the server stopped taking requests, so a clean shutdown loses nothing
+	if persister != nil {
+		if err := persister.Save(); err != nil {
+			log.Printf("[superpeer] saving state on shutdown: %v", err)
+		}
+	}
+
 	log.Println("[superpeer] stopped cleanly")
+}
+
+// stateSaveInterval is how often the state is written to disk
+const stateSaveInterval = 2 * time.Second
+
+// startPersistence loads the saved state into the stores and returns the Persister that keeps saving it
+// It returns nil when stateDir is empty (state only in memory)
+// An error stops the superpeer: starting empty over a state that cannot be read would overwrite it
+func startPersistence(stateDir string, stores persist.Stores) *persist.Persister {
+	if stateDir == "" {
+		log.Println("[superpeer] STATE_DIR not set — state only in memory, lost on restart")
+		return nil
+	}
+
+	persister, err := persist.New(stateDir, stores)
+	if err != nil {
+		log.Fatalf("[superpeer] %v", err)
+	}
+	if err := persister.Load(); err != nil {
+		log.Fatalf("[superpeer] loading state: %v", err)
+	}
+	log.Printf("[superpeer] state kept in %s (saved every %s)", stateDir, stateSaveInterval)
+	return persister
 }

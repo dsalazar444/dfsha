@@ -32,6 +32,11 @@ type Config struct {
 
 	// AESKey holds the decoded 32-byte AES-256 key ready to use with crypto/aes
 	AESKey []byte
+
+	// StateDir is the folder where the superpeer saves its state (state.json), so it survives a restart
+	// If it is a shared folder (NFS/EFS), a second superpeer can take over with the same state
+	// Empty means the state only lives in memory
+	StateDir string
 }
 
 const (
@@ -54,6 +59,7 @@ func Load() *Config {
 		ReplicationFactor: getEnvInt("REPLICATION_FACTOR", defaultReplication),
 		HeartbeatTimeout:  time.Duration(getEnvInt("HEARTBEAT_TIMEOUT_SECONDS", defaultHeartbeatS)) * time.Second,
 		AESKey:            loadAESKey(),
+		StateDir:          getEnvStr("STATE_DIR", ""),
 	}
 }
 

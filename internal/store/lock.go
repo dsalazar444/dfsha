@@ -14,10 +14,10 @@ var (
 
 // FileLock tracks an active write lock on a specific file path
 type FileLock struct {
-	LockID    string
-	UserID    string
-	Path      string
-	ExpiresAt time.Time
+	LockID    string    `json:"lock_id"`
+	UserID    string    `json:"user_id"`
+	Path      string    `json:"path"`
+	ExpiresAt time.Time `json:"expires_at"` // hora absoluta: el TTL sigue corriendo aunque el superpeer se reinicie
 }
 
 // LockStore tracks write locks in memory
@@ -93,6 +93,40 @@ func (s *LockStore) Release(userID, logicalPath, lockID string) error {
 	delete(s.byID, lockID)
 	delete(s.byPath, s.key(userID, logicalPath))
 	return nil
+}
+
+// Export returns a copy of the locks that have not expired yet, to save the state to disk
+func (s *LockStore) Export() []FileLock {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now()
+	locks := make([]FileLock, 0, len(s.byID))
+	for _, lock := range s.byID {
+		if now.Before(lock.ExpiresAt) {
+			locks = append(locks, *lock)
+		}
+	}
+	return locks
+}
+
+// Import replaces all the locks with the given ones (skipping the expired), to load the state from disk
+func (s *LockStore) Import(locks []FileLock) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.byPath = make(map[string]*FileLock, len(locks))
+	s.byID = make(map[string]*FileLock, len(locks))
+
+	now := time.Now()
+	for _, saved := range locks {
+		if now.After(saved.ExpiresAt) {
+			continue
+		}
+		lock := saved
+		s.byPath[s.key(lock.UserID, lock.Path)] = &lock
+		s.byID[lock.LockID] = &lock
+	}
 }
 
 // SweepExpired removes all locks that have exceeded their expiration time
