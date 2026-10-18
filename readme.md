@@ -107,7 +107,7 @@ Se usan **cuatro terminales**. En Windows, son cuatro Git Bash abiertas en la ca
 
 | Terminal | Para qué sirve | Comando |
 |---|---|---|
-| **T0** | Control: crear el archivo de prueba, comprobar resultados y matar nodos | los de los ejemplos |
+| **T0** | Control: crear el archivo de prueba, comprobar resultados y matar nodos | no abre ningún peer: se usa solo cuando un ejemplo lo pide |
 | **T1** | peer1, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer1` |
 | **T2** | peer2, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer2` |
 | **T3** | peer3, usuario `alice` / `alice1234` | `bash deploy/demo-peer.sh peer3` |
@@ -120,7 +120,7 @@ Cada peer:
 - usa como carpeta de trabajo `deploy/demo-files/<peer>/`: ahí se dejan los archivos que se quieren subir y ahí caen los que se bajan;
 - construye su imagen de Docker solo la primera vez. Si cambias el código, reconstrúyela con `docker build -f deploy/Dockerfile --build-arg CMD=peer -t dfsha-peer .`
 
-Los ejemplos se hacen en este orden.
+
 
 #### Ejemplo 1: subir en un peer y bajar en otro
 
