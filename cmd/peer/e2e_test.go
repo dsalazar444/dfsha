@@ -1,4 +1,4 @@
-package peer
+package main
 
 // End-to-end tests of the whole peer: real storage, real HTTP between
 // peers, real encryption and chunking, the real command line, against a
