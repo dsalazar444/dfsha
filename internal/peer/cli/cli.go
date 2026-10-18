@@ -62,11 +62,15 @@ type CLI struct {
 
 	out io.Writer
 	cwd string // current logical directory, always absolute
+
+	// held maps each path locked with the "lock" command to the function that
+	// stops renewing and releases that lock.
+	held map[string]func()
 }
 
 // New builds a CLI. relogin may be nil.
 func New(superpeer Superpeer, transfer FileTransfer, relogin func(ctx context.Context) error) *CLI {
-	return &CLI{superpeer: superpeer, transfer: transfer, relogin: relogin, cwd: "/"}
+	return &CLI{superpeer: superpeer, transfer: transfer, relogin: relogin, cwd: "/", held: map[string]func(){}}
 }
 
 // lineResult is one answer of the input reader goroutine.
@@ -87,6 +91,7 @@ type lineResult struct {
 // printing the password in the error message.
 func (c *CLI) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	c.out = out
+	defer c.releaseAll() // locks must not outlive the session
 
 	// Reading blocks and cannot be interrupted, so it happens in its own
 	// goroutine, and Run waits on both its answer and the context. The
@@ -159,6 +164,10 @@ func (c *CLI) execute(ctx context.Context, line string) (quit bool) {
 		err = c.put(ctx, args)
 	case "get":
 		err = c.get(ctx, args)
+	case "lock":
+		err = c.onePath(args, "lock <path>", func(p string) error { return c.lock(ctx, p) })
+	case "unlock":
+		err = c.onePath(args, "unlock <path>", c.unlock)
 	case "mdf":
 		err = c.mdf(ctx, args)
 	case "login":
@@ -186,6 +195,8 @@ func (c *CLI) help() {
   put <local> [remote]       upload a local file, remote is where you want to save it remotely
   get <remote> [local]       download a file (never overwrites), local is where you want to save it locally
   mdf <remote>               edit a file in $EDITOR (locks it, uploads only if changed)
+  lock <path>                lock a file against other writers (kept until unlock or exit)
+  unlock <path>              release a lock taken with lock
   login                      authenticate again (after "session expired")
   exit                       leave
 Paths with spaces go in quotes. Relative paths start at the current directory.
@@ -369,11 +380,14 @@ func (c *CLI) mdf(ctx context.Context, args []string) error {
 	}
 	remote := resolve(c.cwd, args[0])
 
-	release, err := c.holdLock(ctx, remote)
-	if err != nil {
-		return err
+	// A file already locked with the "lock" command stays locked by that command.
+	if _, ok := c.held[remote]; !ok {
+		release, err := c.holdLock(ctx, remote)
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
-	defer release()
 
 	original, err := c.transfer.Get(ctx, remote)
 	if err != nil {
@@ -420,6 +434,41 @@ func (c *CLI) mdf(ctx context.Context, args []string) error {
 	os.Remove(tmp.Name())
 	c.printf("modified %s (%d bytes, id %s)\n", remote, len(edited), fileID)
 	return nil
+}
+
+// lock takes the write lock of a file and keeps it (renewed) until unlock or until
+// the session ends.
+func (c *CLI) lock(ctx context.Context, remote string) error {
+	if _, ok := c.held[remote]; ok {
+		return fmt.Errorf("%s is already locked by this session", remote)
+	}
+	release, err := c.holdLock(ctx, remote)
+	if err != nil {
+		return err
+	}
+	c.held[remote] = release
+	c.printf("locked %s (until unlock or exit)\n", remote)
+	return nil
+}
+
+// unlock releases a lock taken with lock.
+func (c *CLI) unlock(remote string) error {
+	release, ok := c.held[remote]
+	if !ok {
+		return fmt.Errorf("%s is not locked by this session", remote)
+	}
+	release()
+	delete(c.held, remote)
+	c.printf("unlocked %s\n", remote)
+	return nil
+}
+
+// releaseAll releases every lock taken with lock.
+func (c *CLI) releaseAll() {
+	for remote, release := range c.held {
+		release()
+		delete(c.held, remote)
+	}
 }
 
 // holdLock takes the write lock of a file and keeps it until release is
