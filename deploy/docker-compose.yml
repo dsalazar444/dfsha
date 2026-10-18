@@ -1,17 +1,35 @@
-# Clúster local de DFSha: dos superpeers (uno líder y uno en standby) que comparten una carpeta
+# Clúster local de DFSha: dos superpeers (uno líder y uno en standby) que comparten una carpeta, con TLS
 #
 # El volumen dfsha-state hace de NFS: los dos superpeers lo montan en /data (STATE_DIR) y por ahí
 # se pasan el estado (state.json) y el líder (leader.json). En AWS esa carpeta será un EFS
+#
+# ANTES de levantar hay que generar los certificados (si no, Docker crea carpetas vacías en su lugar):
+#   bash deploy/certs/gen-certs.sh
 #
 #   docker compose -f deploy/docker-compose.yml up -d --build    # levantar
 #   docker compose -f deploy/docker-compose.yml kill sp1          # simular que el líder se cae
 #   docker compose -f deploy/docker-compose.yml down -v           # borrar todo, incluido el estado
 #
-# sp1 -> http://localhost:8081      sp2 -> http://localhost:8082
+# sp1 -> https://localhost:8081      sp2 -> https://localhost:8082
+# Para llamarlos hay que confiar en la CA del proyecto:  curl --cacert deploy/certs/out/ca.crt https://localhost:8081/health
 
 name: dfsha
 
-# Lo que tienen en común los dos superpeers (los dos usan la misma imagen)
+# Configuración que tienen en común los dos superpeers (los dos usan la misma imagen)
+x-superpeer-env: &superpeer-env
+  PORT: "8080"
+  STATE_DIR: /data
+  REPLICATION_FACTOR: "2"
+  HEARTBEAT_TIMEOUT_SECONDS: "15"
+  # Firma los tokens de sesión: tiene que ser EL MISMO en los dos superpeers para que un token de sp1
+  # siga valiendo en sp2. Se toma de la variable de entorno; si no está, los dos usan la clave de desarrollo
+  SESSION_SECRET: ${SESSION_SECRET:-}
+  # TLS: dentro del contenedor el certificado y la clave siempre están en estas rutas (más abajo se montan los de cada nodo)
+  TLS_CERT: /certs/server.crt
+  TLS_KEY: /certs/server.key
+  ALLOW_INSECURE: "false" # sin certificados el superpeer no arranca
+  PEER_SCHEME: https # los clientes y otros peers llegan a los peers por https
+
 x-superpeer: &superpeer
   build:
     context: ..
@@ -19,11 +37,10 @@ x-superpeer: &superpeer
     args:
       CMD: superpeer
   image: dfsha-superpeer
-  volumes:
-    - dfsha-state:/data
   healthcheck:
     # /health responde 200 tanto en el líder como en el standby
-    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
+    # --no-check-certificate: el healthcheck solo comprueba que el proceso responde, no valida el certificado
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "--no-check-certificate", "https://localhost:8080/health"]
     interval: 5s
     timeout: 3s
     retries: 3
@@ -34,14 +51,14 @@ services:
     container_name: dfsha-sp1
     hostname: sp1
     environment:
-      PORT: "8080"
-      STATE_DIR: /data
+      <<: *superpeer-env
       SUPERPEER_ID: sp1 # debe ser distinto en cada superpeer: es el nombre que va en leader.json
-      # Firma los tokens de sesión: tiene que ser EL MISMO en los dos superpeers para que un token de sp1
-      # siga valiendo en sp2. Se toma de la variable de entorno; si no está, los dos usan la clave de desarrollo
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      REPLICATION_FACTOR: "2"
-      HEARTBEAT_TIMEOUT_SECONDS: "15"
+    volumes:
+      - dfsha-state:/data
+      # Solo el certificado y la clave de ESTE nodo, en solo lectura. Nunca la carpeta entera: tendría
+      # la clave del otro nodo y la de la CA (con ella se fabrican certificados válidos)
+      - ./certs/out/sp1.crt:/certs/server.crt:ro
+      - ./certs/out/sp1.key:/certs/server.key:ro
     ports:
       - "8081:8080"
 
@@ -50,12 +67,12 @@ services:
     container_name: dfsha-sp2
     hostname: sp2
     environment:
-      PORT: "8080"
-      STATE_DIR: /data
+      <<: *superpeer-env
       SUPERPEER_ID: sp2
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      REPLICATION_FACTOR: "2"
-      HEARTBEAT_TIMEOUT_SECONDS: "15"
+    volumes:
+      - dfsha-state:/data
+      - ./certs/out/sp2.crt:/certs/server.crt:ro
+      - ./certs/out/sp2.key:/certs/server.key:ro
     ports:
       - "8082:8080"
     # sp2 arranca cuando sp1 ya está sano: así sp1 queda siempre como líder al inicio
@@ -63,7 +80,9 @@ services:
       sp1:
         condition: service_healthy
 
-  # Cuando exista cmd/peer, aquí pomeos lo d  los peers (misma imagen con CMD=peer, un volumen de datos cada uno):
+  # Cuando exista cmd/peer, aquí van los peers (misma imagen con CMD=peer, un volumen de datos cada uno).
+  # Cada peer monta su certificado y su clave, y además ca.crt para confiar en los superpeers y en otros peers.
+  # Los nombres de las variables dependen del main del peer (pendiente de Daniela):
   #
   # peer1:
   #   build:
@@ -72,9 +91,16 @@ services:
   #     args: { CMD: peer }
   #   hostname: peer1
   #   environment:
-  #     SUPERPEER_URLS: http://sp1:8080,http://sp2:8080
+  #     SUPERPEER_URLS: https://sp1:8080,https://sp2:8080
+  #     TLS_CERT: /certs/server.crt
+  #     TLS_KEY: /certs/server.key
+  #     TLS_CA: /certs/ca.crt
+  #     ALLOW_INSECURE: "false"
   #   volumes:
   #     - peer1-data:/data
+  #     - ./certs/out/peer1.crt:/certs/server.crt:ro
+  #     - ./certs/out/peer1.key:/certs/server.key:ro
+  #     - ./certs/out/ca.crt:/certs/ca.crt:ro
 
 volumes:
   dfsha-state:

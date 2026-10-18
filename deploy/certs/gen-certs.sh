@@ -17,7 +17,10 @@ set -euo pipefail
 # Git Bash en Windows convierte "/CN=..." en una ruta de archivo y rompe el comando
 export MSYS_NO_PATHCONV=1
 
-OUT="$(cd "$(dirname "$0")" && pwd)/out"
+# CERTS_DIR cambia la carpeta de salida, por ejemplo para los certificados de AWS sin pisar los locales:
+#   CERTS_DIR=deploy/certs/out-aws bash deploy/certs/gen-certs.sh sp1=...
+OUT="${CERTS_DIR:-$(cd "$(dirname "$0")" && pwd)/out}"
+mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"   # ruta absoluta, venga como venga CERTS_DIR
 CA_DAYS=3650    
 NODE_DAYS=825   
 

@@ -1,4 +1,4 @@
-# Prueba de failover del superpeer con docker compose todo solo en local
+# Prueba de failover del superpeer con docker compose todo solo en local, con TLS (https) entre el cliente y los superpeers
 # Lo q se comprueba :
 #   1. sp1 arranca como líder y sp2 como standby (responde 421 a todo menos /health)
 #   2. se crea estado en sp1 
@@ -10,8 +10,13 @@
 set -u
 cd "$(dirname "$0")/.."
 COMPOSE="docker compose -f deploy/docker-compose.yml"
-SP1=http://localhost:8081
-SP2=http://localhost:8082
+SP1=https://localhost:8081
+SP2=https://localhost:8082
+CA=deploy/certs/out/ca.crt
+
+# Todas las llamadas de abajo confían en la CA del proyecto
+# --ssl-no-revoke: el curl de Windows (Schannel) rechaza una CA propia por no poder comprobar revocación; en Linux no hace nada
+curl() { command curl --cacert "$CA" --ssl-no-revoke "$@"; }
 JSON='Content-Type: application/json'
 FAILED=0
 
@@ -42,13 +47,18 @@ is_leader() { [ "$(role "$1")" = "leader" ]; }
 is_standby() { [ "$(role "$1")" = "standby" ]; }
 
 # ---------- 1. levantar el clúster ----------
-echo "=== 1) Levantando sp1 y sp2 con un volumen compartido"
+echo "=== 1) Levantando sp1 y sp2 con un volumen compartido y TLS"
+# El compose monta los certificados: tienen que existir antes de levantar. La CA se reutiliza si ya existe
+bash deploy/certs/gen-certs.sh > /dev/null || { echo "No se pudieron generar los certificados (¿está instalado openssl?)"; exit 1; }
 $COMPOSE down -v > /dev/null 2>&1
 $COMPOSE up -d --build || { echo "No se pudo levantar el clúster (¿Docker está corriendo?)"; exit 1; }
 wait_for "sp2 responde" 60 is_standby "$SP2"
 check "rol de sp1" "$(role $SP1)" "leader"
 check "rol de sp2" "$(role $SP2)" "standby"
 check "login en sp2 (standby)" "$(code -X POST $SP2/auth/login -H "$JSON" -d '{}')" "421"
+# Que el cifrado esté de verdad activo: sin confiar en la CA no se conecta, y por http plano no se atiende
+check "https SIN la CA es rechazado" "$(command curl -s -m 5 --ssl-no-revoke -o /dev/null -w '%{http_code}' $SP1/health)" "000"
+check "http plano no se atiende" "$(command curl -s -m 5 -o /dev/null -w '%{http_code}' http://localhost:8081/health)" "400"
 
 # ---------- 2. crear estado en el líder ----------
 echo "=== 2) Creando estado en sp1"
@@ -77,6 +87,9 @@ check "heartbeat con el peer_id registrado en sp1" \
 GET=$(curl -s $SP2/files/get/docs/a.txt -H "$AUTH")
 case "$GET" in *"$CHUNK"*) check "get /docs/a.txt en sp2" "devuelve el archivo" "devuelve el archivo" ;;
                *)          check "get /docs/a.txt en sp2" "$GET" "devuelve el archivo" ;; esac
+# Los peers se reparten con https (PEER_SCHEME): es lo que usarán los clientes para bajar los chunks
+case "$GET" in *'"https://peer-falso:9000"'*) check "la URL del peer es https" "https" "https" ;;
+               *)                             check "la URL del peer es https" "$GET" "https" ;; esac
 
 # ---------- 5. el líder anterior vuelve ----------
 echo "=== 5) sp1 vuelve a arrancar"
