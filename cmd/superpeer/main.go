@@ -15,6 +15,7 @@ import (
 	"dfsha/internal/peers"
 	"dfsha/internal/persist"
 	"dfsha/internal/server"
+	"dfsha/internal/shared/tlsconf"
 	"dfsha/internal/store"
 	"errors"
 	"log"
@@ -36,6 +37,7 @@ func main() {
 	// Build stores
 	userStore := store.NewUserStore()
 	peerStore := store.NewPeerStore()
+	peerStore.SetScheme(cfg.PeerScheme) // before loading the saved state: it decides the URL of every peer
 	fsStore := store.NewFsStore()
 	fileStore := store.NewFileStore()
 	lockStore := store.NewLockStore()
@@ -92,13 +94,13 @@ func main() {
 	// Start listening in a goroutine so we can handle shutdown signals
 	serverErr := make(chan error, 1)
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := tlsconf.ListenAndServe(httpServer, cfg.TLSCert, cfg.TLSKey, cfg.AllowInsecure); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}
 	}()
 
-	log.Printf("[superpeer] listening at http://localhost:%s", cfg.Port)
-	log.Printf("[superpeer] health check: GET http://localhost:%s/health", cfg.Port)
+	log.Printf("[superpeer] listening on port %s | peers are reached over %s", cfg.Port, cfg.PeerScheme)
+	log.Printf("[superpeer] health check: GET /health")
 
 	// Block until SIGINT / SIGTERM or a server error
 	quit := make(chan os.Signal, 1)

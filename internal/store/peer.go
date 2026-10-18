@@ -15,12 +15,14 @@ type Peer struct {
 	Chunks         []string
 	LastSeen       time.Time
 	IsHealthy      bool
+	Scheme         string // "http" or "https": how others must connect to this peer (set by the PeerStore)
 }
 
 // PeerStore is a thread-safe in-memory collection of peers
 type PeerStore struct {
 	mu      sync.RWMutex
 	byID    map[string]*Peer
+	scheme  string // "http" or "https", given to every peer that is added or loaded
 }
 
 // NewPeerStore creates a new empty PeerStore
@@ -30,10 +32,20 @@ func NewPeerStore() *PeerStore {
 	}
 }
 
+// SetScheme sets "http" or "https" for the URLs of the peers, from now on and for the ones loaded later
+// A peer does not say how it is reached when it registers, so this is a setting of the whole system (PEER_SCHEME)
+// Call it once at startup, before any peer is added or loaded
+func (s *PeerStore) SetScheme(scheme string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scheme = scheme
+}
+
 // Add registers a new peer in the store
 func (s *PeerStore) Add(p *Peer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p.Scheme = s.scheme
 	s.byID[p.PeerID] = p
 }
 
@@ -120,17 +132,21 @@ func (s *PeerStore) Import(records []PeerRecord) {
 
 	s.byID = make(map[string]*Peer, len(records))
 	for _, r := range records {
-		s.byID[r.PeerID] = &Peer{PeerID: r.PeerID, Address: r.Address, Port: r.Port}
+		s.byID[r.PeerID] = &Peer{PeerID: r.PeerID, Address: r.Address, Port: r.Port, Scheme: s.scheme}
 	}
 }
 
-// URL returns the base URL (http://address:port) where the peer can be reached
-// It is the only place that builds peer URLs (switch to https here when TLS arrives)
+// URL returns the base URL (scheme://address:port) where the peer can be reached
+// It is the only place that builds peer URLs. Without a scheme set it is plain http
 func (p *Peer) URL() string {
-	return "http://" + p.Address + ":" + p.Port
+	scheme := p.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	return scheme + "://" + p.Address + ":" + p.Port
 }
 
-// GetPeerURL returns the formatted URL (http://address:port) for a given peerID
+// GetPeerURL returns the formatted URL (scheme://address:port) for a given peerID
 // Returns empty string if the peer is not found
 func (s *PeerStore) GetPeerURL(peerID string) string {
 	s.mu.RLock()

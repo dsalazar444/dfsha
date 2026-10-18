@@ -42,10 +42,36 @@ type Config struct {
 	// Empty means the state only lives in memory
 	StateDir string
 
+	// TLSCert and TLSKey are the files of this superpeer's certificate and private key (deploy/certs/gen-certs.sh)
+	// With both set it serves HTTPS. Without them: plain HTTP if AllowInsecure, otherwise it refuses to start
+	TLSCert string
+	TLSKey  string
+
+	// AllowInsecure lets the superpeer run over plain HTTP when it has no certificate (local development and tests)
+	AllowInsecure bool
+
+	// PeerScheme is "http" or "https": how clients and other peers must connect to the peers
+	// A peer only registers its address and port, so the scheme is a setting of the whole system
+	PeerScheme string
+
 	// SuperpeerID names this superpeer in the leader lease (STATE_DIR/leader.json)
 	// The two superpeers that share STATE_DIR must have different ids. Defaults to the hostname
 	SuperpeerID string
 }
+
+// TODO(final): TLS es opcional mientras se desarrolla el proyecto, por lo que las
+// ejecuciones locales no necesitan certificados.
+// Antes de entregar el proyecto, se debe hacer obligatorio cambiando estos dos valores
+// predeterminados sin cambiar nada mas en el codigo:
+//   - defaultAllowInsecure -> false  (el superpeer se negará a iniciar si no
+//     están definidos TLS_CERT y TLS_KEY)
+//   - defaultPeerScheme    -> "https"
+//
+// El peer y la CLI tienen su propia configuración y también deben modificarse.
+const (
+	defaultAllowInsecure = true
+	defaultPeerScheme    = "http"
+)
 
 const (
 	defaultPort              = "8080"
@@ -73,6 +99,10 @@ func Load() *Config {
 		AESKey:            loadKey("AES_KEY", devAESKeyHex),
 		SessionSecret:     loadKey("SESSION_SECRET", devSessionSecretHex),
 		StateDir:          getEnvStr("STATE_DIR", ""),
+		TLSCert:           getEnvStr("TLS_CERT", ""),
+		TLSKey:            getEnvStr("TLS_KEY", ""),
+		AllowInsecure:     getEnvBool("ALLOW_INSECURE", defaultAllowInsecure),
+		PeerScheme:        getEnvScheme("PEER_SCHEME", defaultPeerScheme),
 		SuperpeerID:       getEnvStr("SUPERPEER_ID", hostname()),
 	}
 }
@@ -114,6 +144,28 @@ func getEnvStr(key, fallback string) string {
 	return fallback
 }
 
+// getEnvBool returns the boolean value of the env var ("true" / "false") or the fallback default
+func getEnvBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Fatalf("[config] Invalid value for %s: %q — expected true or false", key, v)
+	}
+	return b
+}
+
+// getEnvScheme returns the env var if it is "http" or "https", or the fallback default
+func getEnvScheme(key, fallback string) string {
+	v := getEnvStr(key, fallback)
+	if v != "http" && v != "https" {
+		log.Fatalf("[config] Invalid value for %s: %q — expected http or https", key, v)
+	}
+	return v
+}
+
 // getEnvInt returns the integer value of the env var or the fallback default
 func getEnvInt(key string, fallback int) int {
 	v := os.Getenv(key)
@@ -139,4 +191,3 @@ func getEnvInt64(key string, fallback int64) int64 {
 	}
 	return n
 }
-

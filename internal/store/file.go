@@ -161,7 +161,6 @@ func (s *FileStore) AckChunk(chunkID, peerURL string) error {
 // every known chunk the peer reports gets the peer as assigned and confirmed (AckedPeers),
 // and every chunk it no longer reports stops listing it as confirmed.
 // This lets a standby superpeer, which never saw the original ACKs, rebuild AckedPeers
-// shortcut: chunks the superpeer does not know (orphans) are ignored, answer them with delete tasks later
 func (s *FileStore) SyncPeerChunks(peerURL string, chunkIDs []string) {
 	held := make(map[string]bool, len(chunkIDs))
 	for _, chunkID := range chunkIDs {
