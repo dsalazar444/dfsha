@@ -82,8 +82,8 @@ type PutInitRequest struct {
 
 // Es la respuesta completa de POST /files/put/init del SP. Contiene los chunkAssig. de un file
 type PutInitResponse struct {
-	// TODO: FileID es generado por el superpeer; el peer lo necesita para
-	// construir cada ChunkID al subir y para el ack posterior.
+	// FileID es generado por Peer, pero es retornado en response si es váldio, si no, retorna ""
+	FileID     string
 	Assignment []ChunkAssignment `json:"assignment"`
 }
 
