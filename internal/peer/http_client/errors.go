@@ -66,7 +66,7 @@ func (e *StatusError) Is(target error) bool {
 // been promoted yet), and switching away would just make the peers bounce
 // between superpeers.
 func StatusMeansUnavailable(statusCode int) bool {
-	return statusCode >= 500 && statusCode != http.StatusServiceUnavailable // 503
+	return (statusCode >= 500 || statusCode == 421) && statusCode != http.StatusServiceUnavailable // 503
 }
 
 // IsUnavailable reports whether err means the other side is down, as

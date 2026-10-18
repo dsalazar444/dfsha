@@ -141,5 +141,5 @@ func (c *HTTPClient) DoJSON(ctx context.Context, method, url, token string, in, 
 	return nil
 }
 
-// errInvalidInput is returned for malformed URLs or empty required arguments.
-var errInvalidInput = errors.New("invalid input")
+// ErrInvalidInput is returned for malformed URLs or empty required arguments.
+var ErrInvalidInput = errors.New("invalid input")

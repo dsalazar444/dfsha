@@ -146,6 +146,11 @@ type LockResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// Es el request de POST /files/unlock/{ruta}.
+type UnlockRequest struct {
+	LockID string `json:"lock_id"`
+}
+
 // Es el request para el POST /auth/login.
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -157,4 +162,41 @@ type LoginResponse struct {
 	Token  string `json:"session_token"`
 	UserID string `json:"user_id"`
 	Salt   string `json:"salt"` // salt de Argon2id, para derivar la clave maestra localmente
+}
+
+// --- Tipos que faltaban: payloads JSON entre el peer y el superpeer ---
+
+// Es el request de POST /peers/register.
+type RegisterPeerRequest struct {
+	Address string `json:"address"`
+	Port    string `json:"port"`
+}
+
+// Es la respuesta de POST /peers/register.
+type RegisterPeerResponse struct {
+	PeerID string `json:"peer_id"`
+}
+
+// Es el request de POST /files/put/ack: quién confirma (PeerID) qué chunk
+// ya guardó (ChunkID).
+type PutAckRequest struct {
+	ChunkID ChunkID `json:"chunk_id"`
+	PeerID  string  `json:"peer_id"`
+}
+
+// Es el request de POST /fs/mkdir y de DELETE /fs/rmdir.
+type PathRequest struct {
+	Path string `json:"path"`
+}
+
+// DirEntry es una entrada de un listado de directorio. Type distingue
+// archivo de directorio con los valores que defina el contrato del SP.
+type DirEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// Es la respuesta de GET /fs/ls.
+type ListDirResponse struct {
+	Entries []DirEntry `json:"entries"`
 }
