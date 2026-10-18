@@ -52,6 +52,7 @@ func (t *Transfer) Put(ctx context.Context, logicalPath string, data []byte) (st
 
 // PutWithFileID uploads data as the file at logicalPath and reuses the
 // provided fileID when non-empty. If fileID is empty, a fresh ID is generated.
+// TODO: al crear fileID, y debemos manejar (si fileID es rechazado -> supeerpeer devuelve resp.FileID = "")
 func (t *Transfer) PutWithFileID(ctx context.Context, logicalPath string, data []byte, fileID string) (string, error) {
 	if len(data) == 0 {
 		return "", ErrEmptyFile

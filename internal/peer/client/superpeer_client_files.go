@@ -14,7 +14,6 @@ const ackTimeout = 10 * time.Second
 
 // PutInit starts an upload (POST /files/put/init): the superpeer answers
 // with the peers that must receive each chunk.
-// TODO: En putInit, se debe crear fileID, y debemos manejar response 409
 func (c *SuperpeerClient) PutInit(ctx context.Context, req model.PutInitRequest) (model.PutInitResponse, error) {
 	clean, err := cleanLogicalPath(req.LogicalPath)
 	if err != nil {

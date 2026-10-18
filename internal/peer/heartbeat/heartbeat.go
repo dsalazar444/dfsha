@@ -178,7 +178,6 @@ func (s *Sender) beat(ctx context.Context) {
 		return
 	}
 
-	// TODO: OJO fileID debe ser único -> usar valor diferente (random) al que dice user
 	// Chunk IDs embed a unique file ID, so the superpeer does not need
 	// the owner to identify a chunk. The owner is a storage detail.
 	ids := make([]model.ChunkID, 0, len(chunks))
