@@ -16,18 +16,19 @@ var (
 
 // ChunkMeta tracks the assignment of a single chunk
 type ChunkMeta struct {
-	ChunkID      string
-	ExpectedHash string
-	Peers        []string // List of peer URLs assigned to host this chunk
-	AckedPeers   []string // Subset of Peers that confirmed (put/ack) they hold the chunk
+	ChunkID      string   `json:"chunk_id"`
+	ExpectedHash string   `json:"expected_hash"`
+	Peers        []string `json:"peers"`       // List of peer URLs assigned to host this chunk
+	AckedPeers   []string `json:"acked_peers"` // Subset of Peers that confirmed (put/ack) they hold the chunk
 }
 
 // FileMeta tracks the chunks belonging to a logical file
 type FileMeta struct {
-	FileID      string
-	LogicalPath string
-	ChunkCount  int
-	Chunks      []*ChunkMeta
+	FileID      string       `json:"file_id"`
+	OwnerUserID string       `json:"owner_user_id"` // dueño del archivo: los peers guardan los chunks en disco como dueño/archivo/índice
+	LogicalPath string       `json:"logical_path"`
+	ChunkCount  int          `json:"chunk_count"`
+	Chunks      []*ChunkMeta `json:"chunks"`
 }
 
 // FileStore tracks file metadata and chunk assignments
@@ -68,6 +69,18 @@ func (s *FileStore) GetAllFiles() []*FileMeta {
 		result = append(result, &fileCopy)
 	}
 	return result
+}
+
+// ImportFiles replaces all the file metadata with the given files, to load the state from disk
+// (to save it, GetAllFiles already returns a copy of everything)
+func (s *FileStore) ImportFiles(files []*FileMeta) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.byFile = make(map[string]*FileMeta, len(files))
+	for _, file := range files {
+		s.byFile[file.FileID] = file
+	}
 }
 
 // AddPeerAssignment registers an additional peer as an assigned replica for a chunk
@@ -142,4 +155,33 @@ func (s *FileStore) AckChunk(chunkID, peerURL string) error {
 		}
 	}
 	return ErrChunkNotFound
+}
+
+// SyncPeerChunks uses the chunk list of a heartbeat as the truth about what a peer holds:
+// every known chunk the peer reports gets the peer as assigned and confirmed (AckedPeers),
+// and every chunk it no longer reports stops listing it as confirmed.
+// This lets a standby superpeer, which never saw the original ACKs, rebuild AckedPeers
+func (s *FileStore) SyncPeerChunks(peerURL string, chunkIDs []string) {
+	held := make(map[string]bool, len(chunkIDs))
+	for _, chunkID := range chunkIDs {
+		held[chunkID] = true
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, file := range s.byFile {
+		for _, chunk := range file.Chunks {
+			if held[chunk.ChunkID] {
+				if !slices.Contains(chunk.Peers, peerURL) {
+					chunk.Peers = append(chunk.Peers, peerURL)
+				}
+				if !slices.Contains(chunk.AckedPeers, peerURL) {
+					chunk.AckedPeers = append(chunk.AckedPeers, peerURL)
+				}
+			} else {
+				chunk.AckedPeers = slices.DeleteFunc(chunk.AckedPeers, func(u string) bool { return u == peerURL })
+			}
+		}
+	}
 }

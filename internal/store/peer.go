@@ -11,16 +11,18 @@ type Peer struct {
 	PeerID         string
 	Address        string
 	Port           string
-	AvailableSpace string
+	AvailableSpace int64 // free bytes reported in the last heartbeat
 	Chunks         []string
 	LastSeen       time.Time
 	IsHealthy      bool
+	Scheme         string // "http" or "https": how others must connect to this peer (set by the PeerStore)
 }
 
 // PeerStore is a thread-safe in-memory collection of peers
 type PeerStore struct {
 	mu      sync.RWMutex
 	byID    map[string]*Peer
+	scheme  string // "http" or "https", given to every peer that is added or loaded
 }
 
 // NewPeerStore creates a new empty PeerStore
@@ -30,16 +32,26 @@ func NewPeerStore() *PeerStore {
 	}
 }
 
+// SetScheme sets "http" or "https" for the URLs of the peers, from now on and for the ones loaded later
+// A peer does not say how it is reached when it registers, so this is a setting of the whole system (PEER_SCHEME)
+// Call it once at startup, before any peer is added or loaded
+func (s *PeerStore) SetScheme(scheme string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scheme = scheme
+}
+
 // Add registers a new peer in the store
 func (s *PeerStore) Add(p *Peer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p.Scheme = s.scheme
 	s.byID[p.PeerID] = p
 }
 
 // UpdateHeartbeat refreshes the LastSeen timestamp and updates peer state
 // Returns false if the peer does not exist
-func (s *PeerStore) UpdateHeartbeat(peerID, availableSpace string, chunks []string) bool {
+func (s *PeerStore) UpdateHeartbeat(peerID string, availableSpace int64, chunks []string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -91,13 +103,50 @@ func (s *PeerStore) GetHealthyPeers() []*Peer {
 	return healthy
 }
 
-// URL returns the base URL (http://address:port) where the peer can be reached
-// It is the only place that builds peer URLs (switch to https here when TLS arrives)
-func (p *Peer) URL() string {
-	return "http://" + p.Address + ":" + p.Port
+// PeerRecord is the part of a peer that is worth saving: who it is and where to reach it
+// The rest (free space, chunks, health) is rebuilt by the next heartbeats
+type PeerRecord struct {
+	PeerID  string `json:"peer_id"`
+	Address string `json:"address"`
+	Port    string `json:"port"`
 }
 
-// GetPeerURL returns the formatted URL (http://address:port) for a given peerID
+// Export returns the identity of every registered peer, to save the state to disk
+func (s *PeerStore) Export() []PeerRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := make([]PeerRecord, 0, len(s.byID))
+	for _, p := range s.byID {
+		records = append(records, PeerRecord{PeerID: p.PeerID, Address: p.Address, Port: p.Port})
+	}
+	return records
+}
+
+// Import replaces all the peers with the given ones, to load the state from disk
+// They start as unhealthy: a peer only counts as alive after its first heartbeat,
+// so a peer that keeps its peer_id does not need to register again after a restart or a failover
+func (s *PeerStore) Import(records []PeerRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.byID = make(map[string]*Peer, len(records))
+	for _, r := range records {
+		s.byID[r.PeerID] = &Peer{PeerID: r.PeerID, Address: r.Address, Port: r.Port, Scheme: s.scheme}
+	}
+}
+
+// URL returns the base URL (scheme://address:port) where the peer can be reached
+// It is the only place that builds peer URLs. Without a scheme set it is plain http
+func (p *Peer) URL() string {
+	scheme := p.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	return scheme + "://" + p.Address + ":" + p.Port
+}
+
+// GetPeerURL returns the formatted URL (scheme://address:port) for a given peerID
 // Returns empty string if the peer is not found
 func (s *PeerStore) GetPeerURL(peerID string) string {
 	s.mu.RLock()

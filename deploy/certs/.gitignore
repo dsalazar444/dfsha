@@ -1,0 +1,3 @@
+# Aquí se generan la CA y los certificados con sus CLAVES PRIVADAS: nada de esto se sube al repo
+out/
+out-*/

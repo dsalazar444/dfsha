@@ -22,10 +22,10 @@ var (
 
 // FsNode represents a file or directory in the logical filesystem.
 type FsNode struct {
-	Name     string
-	Type     string
-	FileID   string             // Populated only if Type == NodeTypeFile
-	Children map[string]*FsNode // Populated only if Type == NodeTypeDirectory
+	Name     string             `json:"name"`
+	Type     string             `json:"type"`
+	FileID   string             `json:"file_id,omitempty"`  // Populated only if Type == NodeTypeFile
+	Children map[string]*FsNode `json:"children,omitempty"` // Populated only if Type == NodeTypeDirectory
 }
 
 // FsStore manages an isolated filesystem tree per user
@@ -39,6 +39,44 @@ func NewFsStore() *FsStore {
 	return &FsStore{
 		roots: make(map[string]*FsNode),
 	}
+}
+
+// Export returns a deep copy of every user's tree (keyed by userID), to save the state to disk
+func (s *FsStore) Export() map[string]*FsNode {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	roots := make(map[string]*FsNode, len(s.roots))
+	for userID, root := range s.roots {
+		roots[userID] = cloneNode(root)
+	}
+	return roots
+}
+
+// Import replaces every tree with the given ones, to load the state from disk
+func (s *FsStore) Import(roots map[string]*FsNode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.roots = make(map[string]*FsNode, len(roots))
+	for userID, root := range roots {
+		s.roots[userID] = cloneNode(root)
+	}
+}
+
+// cloneNode copies a node and everything below it
+// Directories always get a non-nil Children map: an empty one is dropped when saved as JSON
+// (omitempty) and would come back nil, and writing into a nil map panics
+func cloneNode(node *FsNode) *FsNode {
+	clone := *node
+	clone.Children = nil
+	if node.Type == NodeTypeDirectory {
+		clone.Children = make(map[string]*FsNode, len(node.Children))
+		for name, child := range node.Children {
+			clone.Children[name] = cloneNode(child)
+		}
+	}
+	return &clone
 }
 
 // getRoot returns the root directory for a user, creating it if necessary

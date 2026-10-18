@@ -77,6 +77,7 @@ func (s *Service) InitPut(userID, logicalPath, requestedFileID string, chunkCoun
 	// Create FileMeta and assign peers round-robin
 	fileMeta := &store.FileMeta{
 		FileID:      fileID,
+		OwnerUserID: userID,
 		LogicalPath: logicalPath,
 		ChunkCount:  chunkCount,
 		Chunks:      make([]*store.ChunkMeta, chunkCount),
