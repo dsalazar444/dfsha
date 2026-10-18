@@ -3,7 +3,7 @@
 package files
 
 import (
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 	"errors"
 	"fmt"
 	"log"

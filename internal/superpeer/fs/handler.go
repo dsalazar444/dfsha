@@ -2,8 +2,8 @@
 package fs
 
 import (
-	"dfsha/internal/middleware"
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/middleware"
+	"dfsha/internal/superpeer/store"
 	"encoding/json"
 	"errors"
 	"net/http"

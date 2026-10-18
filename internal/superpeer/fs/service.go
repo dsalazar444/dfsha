@@ -2,7 +2,7 @@
 package fs
 
 import (
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 )
 
 // FileDeleter deletes the stored data (chunks in the peers) of files that were removed from the tree

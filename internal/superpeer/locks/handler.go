@@ -2,7 +2,7 @@
 package locks
 
 import (
-	"dfsha/internal/middleware"
+	"dfsha/internal/superpeer/middleware"
 	"encoding/json"
 	"errors"
 	"net/http"

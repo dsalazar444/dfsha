@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 
 	"golang.org/x/crypto/bcrypt"
 )
