@@ -2,14 +2,14 @@ package main_test
 
 import (
 	"bytes"
-	"dfsha/internal/auth"
-	"dfsha/internal/config"
-	"dfsha/internal/files"
-	"dfsha/internal/fs"
-	"dfsha/internal/locks"
-	"dfsha/internal/peers"
-	"dfsha/internal/server"
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/auth"
+	"dfsha/internal/superpeer/config"
+	"dfsha/internal/superpeer/files"
+	"dfsha/internal/superpeer/fs"
+	"dfsha/internal/superpeer/locks"
+	"dfsha/internal/superpeer/peers"
+	"dfsha/internal/superpeer/server"
+	"dfsha/internal/superpeer/store"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,17 +36,19 @@ func TestSuperpeerEndToEndFlow(t *testing.T) {
 	fsStore := store.NewFsStore()
 	fileStore := store.NewFileStore()
 	lockStore := store.NewLockStore()
+	taskStore := store.NewTaskStore()
 
 	cfg := &config.Config{
 		Port:              "8080",
 		ChunkSize:         4 * 1024 * 1024,
 		ReplicationFactor: 2,
 		HeartbeatTimeout:  15 * time.Second,
+		SessionSecret:     []byte("testsecret0123456789012345678901"),
 	}
 
-	authService := auth.NewService(userStore)
-	peerService := peers.NewService(peerStore, fileStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
-	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewHTTPChunkDeleter())
+	authService := auth.NewService(userStore, cfg.SessionSecret)
+	peerService := peers.NewService(peerStore, fileStore, taskStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
+	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewTaskChunkDeleter(taskStore))
 	fsService := fs.NewService(fsStore, fileService)
 	lockService := locks.NewService(lockStore, fsStore, 30*time.Second)
 
@@ -128,7 +130,7 @@ func TestSuperpeerEndToEndFlow(t *testing.T) {
 	// --- Step 3: Peer Heartbeats ---
 	hbPayload, _ := json.Marshal(map[string]interface{}{
 		"peer_id":         p1Data.PeerID,
-		"available_space": "1000000000",
+		"available_space": 1000000000,
 		"chunks":          []string{},
 	})
 	rHb := doAuthReq(http.MethodPost, "/peers/heartbeat", hbPayload)

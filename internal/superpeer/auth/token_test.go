@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 	"strings"
 	"testing"
 	"time"

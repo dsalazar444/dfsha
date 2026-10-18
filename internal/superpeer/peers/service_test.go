@@ -2,7 +2,7 @@ package peers
 
 import (
 	"bytes"
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"

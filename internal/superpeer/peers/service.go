@@ -3,7 +3,7 @@ package peers
 
 import (
 	"context"
-	"dfsha/internal/store"
+	"dfsha/internal/superpeer/store"
 	"errors"
 	"log"
 	"time"

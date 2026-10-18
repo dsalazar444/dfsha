@@ -2,7 +2,7 @@
 
 package files
 
-import "dfsha/internal/store"
+import "dfsha/internal/superpeer/store"
 
 // ChunkDeleter es "algo que sabe pedirle a un peer que borre un chunk"
 // Es una interfaz para que Service no dependa de cómo se entrega la orden

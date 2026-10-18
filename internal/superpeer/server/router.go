@@ -3,8 +3,8 @@
 package server
 
 import (
-	"dfsha/internal/config"
-	"dfsha/internal/middleware"
+	"dfsha/internal/superpeer/config"
+	"dfsha/internal/superpeer/middleware"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
