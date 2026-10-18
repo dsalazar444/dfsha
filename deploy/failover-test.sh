@@ -70,11 +70,11 @@ echo "  FAILOVER: $((SECONDS - START)) s"
 
 # ---------- 4. el standby atiende con el estado del líder ----------
 echo "=== 4) sp2 atiende con el estado que dejó sp1"
-TOKEN2=$(login $SP2) 
-AUTH2="Authorization: Bearer $TOKEN2"
+# Mismo token que dio sp1: con JWT y secreto compartido sp2 lo acepta sin volver a hacer login
+check "el token de sp1 vale en sp2" "$(code "$SP2/fs/ls?path=/" -H "$AUTH")" "200"
 check "heartbeat con el peer_id registrado en sp1" \
-  "$(code -X POST $SP2/peers/heartbeat -H "$AUTH2" -H "$JSON" -d "{\"peer_id\":\"$PEER\",\"available_space\":1000,\"chunks\":[\"$CHUNK\"]}")" "200"
-GET=$(curl -s $SP2/files/get/docs/a.txt -H "$AUTH2")
+  "$(code -X POST $SP2/peers/heartbeat -H "$AUTH" -H "$JSON" -d "{\"peer_id\":\"$PEER\",\"available_space\":1000,\"chunks\":[\"$CHUNK\"]}")" "200"
+GET=$(curl -s $SP2/files/get/docs/a.txt -H "$AUTH")
 case "$GET" in *"$CHUNK"*) check "get /docs/a.txt en sp2" "devuelve el archivo" "devuelve el archivo" ;;
                *)          check "get /docs/a.txt en sp2" "$GET" "devuelve el archivo" ;; esac
 

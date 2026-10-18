@@ -6,8 +6,7 @@
 // What is saved: registered peers (only who they are), every user's folder tree, the file metadata
 // (chunks, hashes, who holds each chunk), the write locks and the pending chunk deletions
 // What is not saved: peer health and free space (rebuilt by the next heartbeats) and the users,
-// that are seeded at startup
-// shortcut: login sessions are lost on restart, clients log in again; use signed tokens (JWT) to avoid it
+// that are seeded at startup. Sessions need no saving: tokens are signed JWTs any superpeer can validate
 
 package persist
 

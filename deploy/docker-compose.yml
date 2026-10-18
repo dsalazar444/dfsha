@@ -37,6 +37,9 @@ services:
       PORT: "8080"
       STATE_DIR: /data
       SUPERPEER_ID: sp1 # debe ser distinto en cada superpeer: es el nombre que va en leader.json
+      # Firma los tokens de sesión: tiene que ser EL MISMO en los dos superpeers para que un token de sp1
+      # siga valiendo en sp2. Se toma de la variable de entorno; si no está, los dos usan la clave de desarrollo
+      SESSION_SECRET: ${SESSION_SECRET:-}
       REPLICATION_FACTOR: "2"
       HEARTBEAT_TIMEOUT_SECONDS: "15"
     ports:
@@ -50,6 +53,7 @@ services:
       PORT: "8080"
       STATE_DIR: /data
       SUPERPEER_ID: sp2
+      SESSION_SECRET: ${SESSION_SECRET:-}
       REPLICATION_FACTOR: "2"
       HEARTBEAT_TIMEOUT_SECONDS: "15"
     ports:

@@ -47,7 +47,7 @@ func main() {
 	})
 
 	// Build services
-	authService := auth.NewService(userStore)
+	authService := auth.NewService(userStore, cfg.SessionSecret)
 	peerService := peers.NewService(peerStore, fileStore, taskStore, cfg.HeartbeatTimeout, cfg.ReplicationFactor)
 	fileService := files.NewService(fsStore, fileStore, peerStore, cfg.ReplicationFactor, files.NewTaskChunkDeleter(taskStore))
 	fsService := fs.NewService(fsStore, fileService)

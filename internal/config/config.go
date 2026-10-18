@@ -33,6 +33,10 @@ type Config struct {
 	// AESKey holds the decoded 32-byte AES-256 key ready to use with crypto/aes
 	AESKey []byte
 
+	// SessionSecret signs the session tokens (JWT, HS256). Both superpeers must use the same one,
+	// so a token issued by one is still valid on the other after a failover
+	SessionSecret []byte
+
 	// StateDir is the folder where the superpeer saves its state (state.json), so it survives a restart
 	// If it is a shared folder (NFS/EFS), a second superpeer can take over with the same state
 	// Empty means the state only lives in memory
@@ -53,6 +57,10 @@ const (
 	//Used only when AES_KEY is not set
 	// It is intentionally visible here to make it obvious it is not secret
 	devAESKeyHex = "6466736861646576656b65793030303030303030303030303030303030303030"
+
+	// devSessionSecretHex is the dev placeholder for SESSION_SECRET, used only when it is not set
+	// Being a constant, two superpeers without SESSION_SECRET still share it (fine for local tests only)
+	devSessionSecretHex = "646673686173657373696f6e7365637265743030303030303030303030303030"
 )
 
 // Load reads environment variables and returns a populated Config
@@ -62,28 +70,29 @@ func Load() *Config {
 		ChunkSize:         getEnvInt64("CHUNK_SIZE", defaultChunkSize),
 		ReplicationFactor: getEnvInt("REPLICATION_FACTOR", defaultReplication),
 		HeartbeatTimeout:  time.Duration(getEnvInt("HEARTBEAT_TIMEOUT_SECONDS", defaultHeartbeatS)) * time.Second,
-		AESKey:            loadAESKey(),
+		AESKey:            loadKey("AES_KEY", devAESKeyHex),
+		SessionSecret:     loadKey("SESSION_SECRET", devSessionSecretHex),
 		StateDir:          getEnvStr("STATE_DIR", ""),
 		SuperpeerID:       getEnvStr("SUPERPEER_ID", hostname()),
 	}
 }
 
-// loadAESKey reads AES_KEY from the environment (64 hex chars = 32 bytes)
+// loadKey reads a 32-byte key from the env var name (64 hex chars), used for AES_KEY and SESSION_SECRET
 // Falls back to the dev placeholder when not set, logging a clear warning
 
-func loadAESKey() []byte {
-	hexKey := os.Getenv("AES_KEY")
+func loadKey(name, devHex string) []byte {
+	hexKey := os.Getenv(name)
 	if hexKey == "" {
-		log.Println("[config] WARNING: AES_KEY not set — using insecure dev key. DO NOT use in production.")
-		hexKey = devAESKeyHex
+		log.Printf("[config] WARNING: %s not set — using insecure dev key. DO NOT use in production.", name)
+		hexKey = devHex
 	}
 
 	key, err := hex.DecodeString(hexKey)
 	if err != nil {
-		log.Fatalf("[config] AES_KEY is not valid hex: %v", err)
+		log.Fatalf("[config] %s is not valid hex: %v", name, err)
 	}
 	if len(key) != 32 {
-		log.Fatalf("[config] AES_KEY must decode to exactly 32 bytes (AES-256). Got %d bytes from %d hex chars. Generate with: openssl rand -hex 32", len(key), len(hexKey))
+		log.Fatalf("[config] %s must decode to exactly 32 bytes. Got %d bytes from %d hex chars. Generate with: openssl rand -hex 32", name, len(key), len(hexKey))
 	}
 	return key
 }
