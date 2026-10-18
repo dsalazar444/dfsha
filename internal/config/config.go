@@ -37,6 +37,10 @@ type Config struct {
 	// If it is a shared folder (NFS/EFS), a second superpeer can take over with the same state
 	// Empty means the state only lives in memory
 	StateDir string
+
+	// SuperpeerID names this superpeer in the leader lease (STATE_DIR/leader.json)
+	// The two superpeers that share STATE_DIR must have different ids. Defaults to the hostname
+	SuperpeerID string
 }
 
 const (
@@ -60,6 +64,7 @@ func Load() *Config {
 		HeartbeatTimeout:  time.Duration(getEnvInt("HEARTBEAT_TIMEOUT_SECONDS", defaultHeartbeatS)) * time.Second,
 		AESKey:            loadAESKey(),
 		StateDir:          getEnvStr("STATE_DIR", ""),
+		SuperpeerID:       getEnvStr("SUPERPEER_ID", hostname()),
 	}
 }
 
@@ -81,6 +86,15 @@ func loadAESKey() []byte {
 		log.Fatalf("[config] AES_KEY must decode to exactly 32 bytes (AES-256). Got %d bytes from %d hex chars. Generate with: openssl rand -hex 32", len(key), len(hexKey))
 	}
 	return key
+}
+
+// hostname is the default SUPERPEER_ID (in Docker, the container name or id)
+func hostname() string {
+	name, err := os.Hostname()
+	if err != nil || name == "" {
+		return "superpeer"
+	}
+	return name
 }
 
 // getEnvStr returns the value of the env var or the fallback default

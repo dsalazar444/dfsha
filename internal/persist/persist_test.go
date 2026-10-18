@@ -1,6 +1,7 @@
 package persist
 
 import (
+	"context"
 	"dfsha/internal/store"
 	"errors"
 	"os"
@@ -172,5 +173,30 @@ func TestLoadDropsExpiredLocks(t *testing.T) {
 	}
 	if _, err := second.Locks.Acquire("u2", "/a.txt", "lock2", time.Hour); err != nil {
 		t.Fatalf("expired lock must not survive the restart: %v", err)
+	}
+}
+
+func TestRunOnlySavesWhileAllowed(t *testing.T) {
+	dir := t.TempDir()
+	stores := newStores()
+	fill(t, stores)
+	p, _ := New(dir, stores)
+
+	// Un standby (canSave = false) nunca escribe, aunque pasen varios intervalos
+	ctx, stop := context.WithCancel(context.Background())
+	p.Run(ctx, 20*time.Millisecond, func() bool { return false })
+	time.Sleep(100 * time.Millisecond)
+	stop()
+	if _, err := os.Stat(filepath.Join(dir, fileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a standby wrote state.json (err = %v)", err)
+	}
+
+	// El líder (canSave = true) sí escribe
+	ctx, stop = context.WithCancel(context.Background())
+	defer stop()
+	p.Run(ctx, 20*time.Millisecond, func() bool { return true })
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(dir, fileName)); err != nil {
+		t.Fatalf("the leader did not write state.json: %v", err)
 	}
 }

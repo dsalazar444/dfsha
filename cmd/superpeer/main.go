@@ -9,7 +9,9 @@ import (
 	"dfsha/internal/config"
 	"dfsha/internal/files"
 	"dfsha/internal/fs"
+	"dfsha/internal/leader"
 	"dfsha/internal/locks"
+	"dfsha/internal/middleware"
 	"dfsha/internal/peers"
 	"dfsha/internal/persist"
 	"dfsha/internal/server"
@@ -61,10 +63,15 @@ func main() {
 	// Build the HTTP router with all routes registered
 	router := server.NewRouter(cfg, authService, authHandler, peerHandler, fsHandler, fileHandler, lockHandler)
 
+	// Leader election: with a shared STATE_DIR only one superpeer serves, the other waits on standby
+	// (answering 421) and takes over when the leader's lease expires
+	elector := newElector(cfg, persister)
+	isLeader := func() bool { return elector == nil || elector.IsLeader() }
+
 	// Configure the HTTP server
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      router,
+		Handler:      middleware.RequireLeader(isLeader)(router),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -73,10 +80,13 @@ func main() {
 	// Start background tasks
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel() // ensure tasks are cancelled on exit
+	if elector != nil {
+		elector.Run(bgCtx) // decides the role before the server starts accepting requests
+	}
 	peerService.StartHealthMonitor(bgCtx)
 	lockService.StartExpirySweeper(bgCtx)
 	if persister != nil {
-		persister.Run(bgCtx, stateSaveInterval)
+		persister.Run(bgCtx, stateSaveInterval, isLeader)
 	}
 
 	// Start listening in a goroutine so we can handle shutdown signals
@@ -110,7 +120,8 @@ func main() {
 	}
 
 	// Last save, after the server stopped taking requests, so a clean shutdown loses nothing
-	if persister != nil {
+	// (only the leader writes: a standby's copy is older than the file)
+	if persister != nil && isLeader() {
 		if err := persister.Save(); err != nil {
 			log.Printf("[superpeer] saving state on shutdown: %v", err)
 		}
@@ -119,8 +130,25 @@ func main() {
 	log.Println("[superpeer] stopped cleanly")
 }
 
-// stateSaveInterval is how often the state is written to disk
-const stateSaveInterval = 2 * time.Second
+const (
+	// stateSaveInterval is how often the state is written to disk
+	stateSaveInterval = 2 * time.Second
+
+	// leaseTTL is how long the leader's lease lasts without being renewed: after the leader dies,
+	// the standby takes over within leaseTTL + leaseRenewEvery (about 20 s)
+	leaseTTL        = 15 * time.Second
+	leaseRenewEvery = 5 * time.Second
+)
+
+// newElector returns the leader elector, or nil when there is no STATE_DIR (a single superpeer, always leader)
+// When it becomes the leader it loads state.json again, to pick up what the old leader saved
+func newElector(cfg *config.Config, persister *persist.Persister) *leader.Elector {
+	if persister == nil {
+		return nil
+	}
+	log.Printf("[superpeer] id=%s — leader election through %s/leader.json", cfg.SuperpeerID, cfg.StateDir)
+	return leader.New(cfg.StateDir, cfg.SuperpeerID, leaseTTL, leaseRenewEvery, persister.Load)
+}
 
 // startPersistence loads the saved state into the stores and returns the Persister that keeps saving it
 // It returns nil when stateDir is empty (state only in memory)

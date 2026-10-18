@@ -116,17 +116,19 @@ func (p *Persister) Save() error {
 	if bytes.Equal(data, p.last) {
 		return nil
 	}
-	if err := writeAtomic(p.path, data); err != nil {
+	if err := WriteFileAtomic(p.path, data); err != nil {
 		return err
 	}
 	p.last = data
 	return nil
 }
 
-// Run saves the state every interval until ctx is canceled
+// Run saves the state every interval until ctx is canceled, but only while canSave() is true:
+// with two superpeers sharing the folder, only the leader may write, or the standby would
+// overwrite the good state with its old copy
 // Saving on a timer (and not on every change) keeps the stores unaware of the disk
 // shortcut: a crash loses up to one interval of changes; call Save once more on a clean shutdown
-func (p *Persister) Run(ctx context.Context, interval time.Duration) {
+func (p *Persister) Run(ctx context.Context, interval time.Duration, canSave func() bool) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		defer ticker.Stop()
@@ -135,6 +137,9 @@ func (p *Persister) Run(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if !canSave() {
+					continue
+				}
 				if err := p.Save(); err != nil {
 					log.Printf("[persist] saving state: %v", err)
 				}
@@ -164,10 +169,11 @@ func (p *Persister) snapshot() snapshot {
 	return snap
 }
 
-// writeAtomic writes data to a temporary file in the same folder and renames it over path
+// WriteFileAtomic writes data to a temporary file in the same folder and renames it over path,
+// so readers see the old content or the new one, never a half-written file
 // (the rename is only atomic inside the same filesystem, that is why the temporary file is not in /tmp)
-func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "state-*.tmp")
+func WriteFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temporary file: %w", err)
 	}
