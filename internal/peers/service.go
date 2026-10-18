@@ -123,23 +123,29 @@ func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
 
 	for _, file := range files {
 		for _, chunk := range file.Chunks {
-			// Find healthy replicas for this chunk
-			var healthyReplicas []string
-			alreadyAssignedToCaller := false
+			// Count confirmed (ACKed) replicas that are currently healthy
+			var healthyAckedReplicas []string
+			callerAlreadyAcked := false
 
-			for _, pURL := range chunk.Peers {
+			for _, pURL := range chunk.AckedPeers {
 				if pURL == peerURL {
-					alreadyAssignedToCaller = true
+					callerAlreadyAcked = true
 				}
 				if healthyURLs[pURL] {
-					healthyReplicas = append(healthyReplicas, pURL)
+					healthyAckedReplicas = append(healthyAckedReplicas, pURL)
 				}
 			}
 
-			// If the caller is not assigned to this chunk, and the chunk is under-replicated,
-			// and there is at least one healthy replica to copy from:
-			if !alreadyAssignedToCaller && len(healthyReplicas) > 0 && len(healthyReplicas) < s.replFactor {
-				// Register this peer as assigned for this chunk in FileStore so it can put/ack it later
+			// If caller already confirmed having this chunk, no task needed for them
+			if callerAlreadyAcked {
+				continue
+			}
+
+			// If the chunk is under-replicated (fewer healthy confirmed copies than replFactor),
+			// and there is at least one healthy confirmed copy to download from:
+			if len(healthyAckedReplicas) > 0 && len(healthyAckedReplicas) < s.replFactor {
+				
+				// Ensure this peer is authorized in Peers so when it finishes it can put/ack it
 				s.fileStore.AddPeerAssignment(chunk.ChunkID, peerURL)
 
 				// Todas las réplicas sanas van como fuentes: el peer prueba una por una hasta que alguna responda
@@ -147,11 +153,10 @@ func (s *Service) checkReplicationTasks(peerID string) []ReplicationTask {
 					Action:       ActionGet,
 					ChunkID:      chunk.ChunkID,
 					OwnerUserID:  file.OwnerUserID,
-					SourceURLs:   healthyReplicas,
+					SourceURLs:   healthyAckedReplicas,
 					ExpectedHash: chunk.ExpectedHash,
 				}
 				tasks = append(tasks, task)
-				log.Printf("[peers] Assigned replication task to peer %s for chunk %s from %v", peerID, chunk.ChunkID, healthyReplicas)
 
 				// Limit to at most 3 tasks per heartbeat to avoid overwhelming the peer
 				if len(tasks) >= 3 {

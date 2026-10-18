@@ -30,7 +30,7 @@ func newTestService(deleter ChunkDeleter) (*Service, *store.PeerStore) {
 
 func TestGetOnlyAckedAndHealthyPeers(t *testing.T) {
 	s, peerStore := newTestService(nil)
-	_, assignments, err := s.InitPut("u1", "/a.txt", 1, []string{"hash0"})
+	_, assignments, err := s.InitPut("u1", "/a.txt", "", 1, []string{"hash0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestGetOnlyAckedAndHealthyPeers(t *testing.T) {
 func TestDeleteRemovesFileAndAsksAssignedPeers(t *testing.T) {
 	deleter := fakeDeleter{calls: make(chan string, 4)}
 	s, _ := newTestService(deleter)
-	if _, _, err := s.InitPut("u1", "/a.txt", 1, []string{"hash0"}); err != nil {
+	if _, _, err := s.InitPut("u1", "/a.txt", "", 1, []string{"hash0"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +104,7 @@ func TestDeleteRemovesFileAndAsksAssignedPeers(t *testing.T) {
 func TestDeleteFilesAsksPeersLikeRmdir(t *testing.T) {
 	deleter := fakeDeleter{calls: make(chan string, 4)}
 	s, _ := newTestService(deleter)
-	fileID, _, err := s.InitPut("u1", "/a.txt", 1, []string{"hash0"})
+	fileID, _, err := s.InitPut("u1", "/a.txt", "", 1, []string{"hash0"})
 	if err != nil {
 		t.Fatal(err)
 	}
