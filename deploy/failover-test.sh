@@ -47,11 +47,12 @@ is_leader() { [ "$(role "$1")" = "leader" ]; }
 is_standby() { [ "$(role "$1")" = "standby" ]; }
 
 # ---------- 1. levantar el clúster ----------
+
 echo "=== 1) Levantando sp1 y sp2 con un volumen compartido y TLS"
 # El compose monta los certificados: tienen que existir antes de levantar. La CA se reutiliza si ya existe
 bash deploy/certs/gen-certs.sh > /dev/null || { echo "No se pudieron generar los certificados (¿está instalado openssl?)"; exit 1; }
 $COMPOSE down -v > /dev/null 2>&1
-$COMPOSE up -d --build || { echo "No se pudo levantar el clúster (¿Docker está corriendo?)"; exit 1; }
+$COMPOSE up -d --build sp1 sp2 || { echo "No se pudo levantar el clúster (¿Docker está corriendo?)"; exit 1; }
 wait_for "sp2 responde" 60 is_standby "$SP2"
 check "rol de sp1" "$(role $SP1)" "leader"
 check "rol de sp2" "$(role $SP2)" "standby"
@@ -69,8 +70,7 @@ check "mkdir /docs" "$(code -X POST $SP1/fs/mkdir -H "$AUTH" -H "$JSON" -d '{"pa
 CHUNK=$(curl -s -X POST $SP1/files/put/init -H "$AUTH" -H "$JSON" \
   -d '{"logical_path":"/docs/a.txt","chunk_count":1,"hash_of_each_chunk":["h0"]}' | sed -E 's/.*"assignment":\[\{"chunk_id":"([^"]+)".*/\1/')
 check "put/ack" "$(code -X POST $SP1/files/put/ack -H "$AUTH" -H "$JSON" -d "{\"chunk_id\":\"$CHUNK\",\"peer_id\":\"$PEER\"}")" "200"
-sleep 3 # el líder guarda el estado cada 2 s
-
+sleep 3
 # ---------- 3. kill al líder ----------
 echo "=== 3) Matando sp1 de golpe (kill, sin apagado limpio)"
 $COMPOSE kill sp1 > /dev/null
@@ -87,7 +87,8 @@ check "heartbeat con el peer_id registrado en sp1" \
 GET=$(curl -s $SP2/files/get/docs/a.txt -H "$AUTH")
 case "$GET" in *"$CHUNK"*) check "get /docs/a.txt en sp2" "devuelve el archivo" "devuelve el archivo" ;;
                *)          check "get /docs/a.txt en sp2" "$GET" "devuelve el archivo" ;; esac
-# Los peers se reparten con https (PEER_SCHEME): es lo que usarán los clientes para bajar los chunks
+
+
 case "$GET" in *'"https://peer-falso:9000"'*) check "la URL del peer es https" "https" "https" ;;
                *)                             check "la URL del peer es https" "$GET" "https" ;; esac
 
@@ -99,7 +100,7 @@ sleep 6
 check "rol de sp1" "$(role $SP1)" "standby"
 check "rol de sp2" "$(role $SP2)" "leader"
 
-# ---------- resultade ----------
+# ---------- resultado ----------
 echo
 [ "$FAILED" = 0 ] && echo "RESULTADO: todo bien" || echo "RESULTADO: hubo fallas (arriba)"
 [ "${1:-}" = "--clean" ] && $COMPOSE down -v > /dev/null 2>&1
