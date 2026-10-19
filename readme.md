@@ -35,7 +35,25 @@ Sistema de archivos distribuido peer-to-peer escrito en Go. Cada usuario ve un �
 
 ### Arquitectura
 
-*Pendiente.*
+```mermaid
+flowchart TB
+    U(["Usuarios, cada uno en su peer"])
+
+    subgraph PEERS["Peers · plano de datos · N, cualquier cantidad"]
+        direction LR
+        A["Peer 1"] <-->|"chunks cifrados<br/>HTTPS + mTLS"| B["Peer 2"]
+        B <--> N["… Peer N"]
+    end
+
+    subgraph SUPER["Superpeers · plano de control · metadatos"]
+        direction LR
+        L["Líder"] -->|"estado y lease"| E[("Carpeta compartida (NFS/EFS)")]
+        E -->|"lo toma si el líder cae"| S["Standby"]
+    end
+
+    U --> PEERS
+    PEERS ==>|"HTTPS + token JWT<br/>login, rutas, put y get, locks, heartbeat"| SUPER
+```
 
 ### Qué pasa al subir un archivo (`put`)
 1. El peer pide la contraseña, inicia sesión en el superpeer y recibe un token y una *sal*. Con ellas deriva su clave maestra (Argon2id). **La clave nunca sale del peer ni se guarda.**
