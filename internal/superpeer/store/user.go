@@ -60,6 +60,7 @@ func (s *UserStore) seed() {
 	entries := []seedEntry{
 		{id: "user-001", username: "alice", password: "alice1234", salt: "a1f0d2c3e4b567890123456789abcdef"},
 		{id: "user-002", username: "bob", password: "bob1234", salt: "b2e1c4d5f6a789012345678901bcdefa"},
+		{id: "user-003", username: "maria", password: "maria123", salt: "c3f2d5e6a7b890123456789012cdefab"},
 	}
 
 	for _, e := range entries {
