@@ -88,7 +88,7 @@ internal/peer/        almacenamiento, servidor, cliente, transferencia, cifrado,
 internal/shared/      modelo de datos común y configuración de TLS (tlsconf)
 deploy/               Dockerfile, docker-compose, certificados y scripts de prueba
 superpeer-openapi.yaml, peer-openapi.yaml    contratos de las dos APIs
-docs/despliegueaws.md  guía de despliegue en AWS (pendiente)
+docs/despliegueaws.md  entorno de ejecución y despliegue en AWS
 ```
 
 ## 3. Reproducirlo en local
@@ -264,7 +264,7 @@ Las rutas con espacios van entre comillas, y las relativas parten del directorio
 
 ## 4. Despliegue en AWS
 
-Ver [`docs/despliegueaws.md`](docs/despliegueaws.md). *Pendiente.*
+La descripción del entorno de ejecución y el paso a paso del despliegue están en [`docs/despliegueaws.md`](docs/despliegueaws.md).
 
 ## 5. Documentos
 - [`superpeer-openapi.yaml`](superpeer-openapi.yaml) y [`peer-openapi.yaml`](peer-openapi.yaml): contratos de las APIs.
